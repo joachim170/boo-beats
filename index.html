@@ -112,7 +112,7 @@ summary{cursor:pointer;font-family:var(--display);font-weight:600;font-size:18px
 
 <script>
 (()=>{
-const VERSION='0.5';
+const VERSION='0.6';
 const $=id=>document.getElementById(id);
 document.querySelectorAll('.vnum').forEach(e=>e.textContent=VERSION);
 const cv=$('game'), g=cv.getContext('2d');
@@ -165,11 +165,11 @@ async function loadAI(){
   try{
     await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
     await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js');
-    aiModel=await cocoSsd.load({base:'mobilenet_v2'});status('AI redo. Visa bollen för kameran.');aiLoop();
+    aiModel=await cocoSsd.load({base:'mobilenet_v2'});status('AI redo. Visa bollen – eller tryck på den i bilden för att låsa den direkt.');aiLoop();
   }catch(e){status('AI-modellen gick inte att ladda. Byt till Färg-spårning.');}
   aiLoading=false;
 }
-function onModeChange(){trackX=null;aiBox=null;if(trkMode()==='ai'){loadAI();if(aiModel)status('AI redo. Visa bollen för kameran.')}else status(target?'Färg låst. Tryck på bollen för att kalibrera om.':'Tryck på bollen i kamerabilden för att låsa färgen.')}
+function onModeChange(){trackX=null;aiBox=null;if(trkMode()==='ai'){loadAI();if(aiModel)status('AI redo. Visa bollen – eller tryck på den i bilden för att låsa den direkt.')}else status(target?'Färg låst. Tryck på bollen för att kalibrera om.':'Tryck på bollen i kamerabilden för att låsa färgen.')}
 async function startCam(deviceId){
   try{
     if(stream)stream.getTracks().forEach(t=>t.stop());
@@ -191,7 +191,7 @@ function setX(x){trackX=trackX==null?x:trackX*.4+x*.6;lastSeen=performance.now()
 
 /* AI: COCO-SSD "sports ball" – med zoom runt bollen och rutor när den tappas */
 const zc=document.createElement('canvas');zc.width=zc.height=320;const zx=zc.getContext('2d');
-let tile=0,missN=0;
+let tile=0,missN=0,lastAI=0;
 async function detectRegion(sx,sy,sw,sh,minScore){
   // ritar en del av videon till 320x320 och kör detektorn där; returnerar bollar i videokoordinater
   zx.drawImage(video,sx,sy,sw,sh,0,0,320,320);
@@ -200,8 +200,9 @@ async function detectRegion(sx,sy,sw,sh,minScore){
 }
 async function aiLoop(){
   if(!aiModel)return;
-  if(camOn&&trkMode()==='ai'&&!aiBusy&&video.readyState>=2){
-    aiBusy=true;
+  const tracking=tmpl&&tMiss<=10,due=performance.now()-lastAI>(tracking?1200:0);
+  if(camOn&&trkMode()==='ai'&&!aiBusy&&video.readyState>=2&&due){
+    aiBusy=true;lastAI=performance.now();
     try{
       const vw=video.videoWidth,vh=video.videoHeight,y0=roiY()*vh,sens=+$('sens').value;
       const minScore=Math.max(.08,.55-sens*.05);
@@ -223,7 +224,11 @@ async function aiLoop(){
       let best=null,bestS=-1;
       for(const h of hits){const cx=1-(h.x+h.w/2)/vw,cy=(h.y+h.h/2)/vh;if(cy<roiY())continue;
         let sc=h.score;if(trackX!=null)sc-=Math.abs(cx-trackX)*.4;if(sc>bestS){bestS=sc;best={cx,cy,w:h.w/vw,h:h.h/vh,score:h.score}}}
-      if(best){setX(best.cx);aiBox=best;missN=0}else missN++;
+      if(best){missN=0;
+        const bpx=best.cx*TW,bpy=best.cy*TH,bsz=Math.max(best.w*TW,best.h*TH);
+        if(!tmpl||Math.hypot(bpx-tpos.x,bpy-tpos.y)>tS*1.5||tScore<.6){const g=grayFrame();if(g)seedAt(bpx,bpy,bsz,g)}
+        if(!tmpl){setX(best.cx);aiBox=best}
+      }else missN++;
       aiN++;const t=performance.now();if(t-aiT>1000){aiFps=aiN*1000/(t-aiT);aiN=0;aiT=t;status((camActive()?'Bollen hittad':'Letar efter bollen…')+' · '+aiFps.toFixed(0)+' bilder/s')}
     }catch(e){}
     aiBusy=false;
@@ -231,12 +236,57 @@ async function aiLoop(){
   requestAnimationFrame(aiLoop);
 }
 
+/* Mallspårning: följer bollen bild för bild (30 fps) efter att AI:n hittat den eller du tryckt på den */
+const TW=320,TH=240,tcv=document.createElement('canvas');tcv.width=TW;tcv.height=TH;const tx=tcv.getContext('2d',{willReadFrequently:true});
+let tmpl=null,tS=0,tpos=null,tMiss=0,tScore=0,tvel={x:0,y:0};
+function grayFrame(){if(video.readyState<2)return null;tx.save();tx.scale(-1,1);tx.drawImage(video,-TW,0,TW,TH);tx.restore();const d=tx.getImageData(0,0,TW,TH).data,g=new Float32Array(TW*TH);for(let i=0,p=0;p<g.length;i+=4,p++)g[p]=d[i]*.299+d[i+1]*.587+d[i+2]*.114;return blur(blur(g))}
+const bt=new Float32Array(TW*TH);function blur(g){const r=2,k=2*r+1;for(let y=0;y<TH;y++){let a=0;const o=y*TW;for(let x=-r;x<=r;x++)a+=g[o+Math.min(TW-1,Math.max(0,x))];for(let x=0;x<TW;x++){bt[o+x]=a/k;a+=g[o+Math.min(TW-1,x+r+1)]-g[o+Math.max(0,x-r)]}}const out=new Float32Array(TW*TH);for(let x=0;x<TW;x++){let a=0;for(let y=-r;y<=r;y++)a+=bt[Math.min(TH-1,Math.max(0,y))*TW+x];for(let y=0;y<TH;y++){out[y*TW+x]=a/k;a+=bt[Math.min(TH-1,y+r+1)*TW+x]-bt[Math.max(0,y-r)*TW+x]}}return out}
+function patch(g,cx,cy,S){const h=S>>1,out=new Float32Array(S*S);let m=0;for(let y=0;y<S;y++)for(let x=0;x<S;x++){const X=Math.min(TW-1,Math.max(0,Math.round(cx-h+x))),Y=Math.min(TH-1,Math.max(0,Math.round(cy-h+y)));const v=g[Y*TW+X];out[y*S+x]=v;m+=v}m/=out.length;let sd=0;for(let i=0;i<out.length;i++){out[i]-=m;sd+=out[i]*out[i]}sd=Math.sqrt(sd)||1;for(let i=0;i<out.length;i++)out[i]/=sd;return{p:out,sd}}
+function radial(p,S){const h=S/2,nb=Math.ceil(h*1.42)+1,sum=new Float32Array(nb),cnt=new Float32Array(nb);for(let y=0;y<S;y++)for(let x=0;x<S;x++){const b=Math.round(Math.hypot(x+.5-h,y+.5-h));sum[b]+=p[y*S+x];cnt[b]++}const o=new Float32Array(S*S);let m=0;for(let y=0;y<S;y++)for(let x=0;x<S;x++){const b=Math.round(Math.hypot(x+.5-h,y+.5-h));o[y*S+x]=sum[b]/cnt[b];m+=o[y*S+x]}m/=o.length;let sd=0;for(let i=0;i<o.length;i++){o[i]-=m;sd+=o[i]*o[i]}sd=Math.sqrt(sd)||1;for(let i=0;i<o.length;i++)o[i]/=sd;return o}
+function scaleT(t,S,N){const o=new Float32Array(N*N);let m=0;for(let y=0;y<N;y++)for(let x=0;x<N;x++){const v=t[Math.min(S-1,Math.floor(y*S/N))*S+Math.min(S-1,Math.floor(x*S/N))];o[y*N+x]=v;m+=v}m/=o.length;let sd=0;for(let i=0;i<o.length;i++){o[i]-=m;sd+=o[i]*o[i]}sd=Math.sqrt(sd)||1;for(let i=0;i<o.length;i++)o[i]/=sd;return o}
+function seedAt(cx,cy,size,g){
+  if(!size){ // hitta bollens storlek: störst skillnad mellan mitten och en ring runt
+    let best=-1;for(const D of [8,10,13,16,20,25,31,38]){let a=0,na=0,b=0,nb=0;const r=D/2;
+      for(let y=-D;y<=D;y++)for(let x=-D;x<=D;x++){const d=Math.hypot(x,y),X=Math.round(cx+x),Y=Math.round(cy+y);if(X<0||Y<0||X>=TW||Y>=TH)continue;const v=g[Y*TW+X];if(d<r*.6){a+=v;na++}else if(d>r*1.15&&d<r*1.6){b+=v;nb++}}
+      const c=na&&nb?Math.abs(a/na-b/nb):0;if(c>best*1.08){best=c;size=D}}}
+  tS=Math.max(10,Math.min(48,Math.round(size*1.5)))|0;if(tS%2)tS++;tmpl=radial(patch(g,cx,cy,tS).p,tS);tpos={x:cx,y:cy};tvel={x:0,y:0};tMiss=0;tScore=1;
+}
+function ncc(g,cx,cy){const S=tS,h=S>>1;let m=0,n=S*S;const x0=Math.round(cx-h),y0=Math.round(cy-h);if(x0<0||y0<0||x0+S>TW||y0+S>TH)return -1;
+  for(let y=0;y<S;y++){const r=(y0+y)*TW+x0;for(let x=0;x<S;x++)m+=g[r+x]}m/=n;let num=0,den=0;
+  for(let y=0;y<S;y++){const r=(y0+y)*TW+x0;for(let x=0;x<S;x++){const v=g[r+x]-m;num+=v*tmpl[y*S+x];den+=v*v}}return den>1?num/Math.sqrt(den):-1}
+let tFrame=0;
+function globalSearch(g){ // hela golvytan, grovt raster, hittar bollen igen efter tapp
+  const h=tS>>1,y0=Math.max(h,Math.round(roiY()*TH)+h);let best=-2,bx=0,by=0;
+  for(let y=y0;y<TH-h;y+=3)for(let x=h;x<TW-h;x+=3){const v=ncc(g,x,y);if(v>best){best=v;bx=x;by=y}}
+  for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const v=ncc(g,bx+dx,by+dy);if(v>best){best=v;bx+=dx;by+=dy}}
+  return{best,bx,by};
+}
+function templateTrack(){
+  if(!tmpl)return;const g=grayFrame();if(!g)return;tFrame++;
+  if(tMiss>10){ // tappad: leta i hela bilden var 3:e bild
+    if(tFrame%2)return;
+    // prova en storlek per försök (bollen kan ha kommit närmare/längre bort)
+    const SC=[1,.7,1.4,.5,2,2.8,.35],f=SC[(tFrame>>1)%SC.length],keep={t:tmpl,s:tS};
+    const S=Math.max(10,Math.min(64,Math.round(keep.s*f/2)*2));if(S!==tS){tS=S;tmpl=scaleT(keep.t,keep.s,S)}
+    const r=globalSearch(g);
+    if(r.best>.72){tpos={x:r.bx,y:r.by};tvel={x:0,y:0};tMiss=0;tScore=r.best;setX(r.bx/TW);aiBox={cx:r.bx/TW,cy:r.by/TH,w:tS/TW,h:tS/TH,score:r.best}}
+    else{tmpl=keep.t;tS=keep.s}
+    return;
+  }const R=Math.round(Math.max(24,tS*2.5))*(tMiss?1.5:1);const px=tpos.x+tvel.x,py=tpos.y+tvel.y;let best=-2,bx=px,by=py;
+  for(let dy=-R;dy<=R;dy+=2)for(let dx=-R;dx<=R;dx+=2){const v=ncc(g,px+dx,py+dy);if(v>best){best=v;bx=px+dx;by=py+dy}}
+  for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const v=ncc(g,bx+dx,by+dy);if(v>best){best=v;bx+=dx;by+=dy}}
+  tScore=best;
+  if(best>.55&&by/TH>=roiY()){tvel={x:(bx-tpos.x)*.6,y:(by-tpos.y)*.6};tpos={x:bx,y:by};tMiss=0;setX(bx/TW);aiBox={cx:bx/TW,cy:by/TH,w:tS/TW,h:tS/TH,score:best};
+    if(best>.8){const q=radial(patch(g,bx,by,tS).p,tS);for(let i=0;i<tmpl.length;i++)tmpl[i]=tmpl[i]*.9+q[i]*.1}}
+  else{tvel={x:0,y:0};tMiss++}
+}
+
 /* Färg */
 function rgb2hsv(r,g2,b){r/=255;g2/=255;b/=255;const mx=Math.max(r,g2,b),mn=Math.min(r,g2,b),d=mx-mn;let h=0;if(d){if(mx===r)h=((g2-b)/d)%6;else if(mx===g2)h=(b-r)/d+2;else h=(r-g2)/d+4;h*=60;if(h<0)h+=360}return[h,mx?d/mx:0,mx]}
 camCv.addEventListener('pointerdown',e=>{
   if(camCv.classList.contains('mini')){camCv.classList.toggle('off');return}
-  if(trkMode()!=='color'){$('trkMode').value='color';store.set('trkMode','color')}
   const r=camCv.getBoundingClientRect();const x=Math.round((e.clientX-r.left)/r.width*CW),y=Math.round((e.clientY-r.top)/r.height*CH);
+  if(trkMode()==='ai'){const g0=grayFrame();if(g0){seedAt(x/CW*TW,y/CH*TH,null,g0);status('Bollen låst – följer den nu. Tryck igen om den tappas.')}return}
   cc.save();cc.scale(-1,1);cc.drawImage(video,-CW,0,CW,CH);cc.restore();
   const d=cc.getImageData(Math.max(0,x-3),Math.max(0,y-3),7,7).data;let R=0,G=0,B=0;for(let i=0;i<d.length;i+=4){R+=d[i];G+=d[i+1];B+=d[i+2]}const n=d.length/4;
   target=rgb2hsv(R/n,G/n,B/n);trackX=null;
@@ -257,7 +307,8 @@ function track(){
   if(!camOn||video.readyState<2)return;
   cc.save();cc.scale(-1,1);cc.drawImage(video,-CW,0,CW,CH);cc.restore();
   if(trkMode()==='color')colorTrack();
-  else if(aiBox&&performance.now()-lastSeen<700){cc.strokeStyle='#ffd23f';cc.lineWidth=2;cc.strokeRect((aiBox.cx-aiBox.w/2)*CW,(aiBox.cy-aiBox.h/2)*CH,aiBox.w*CW,aiBox.h*CH)}
+  else{templateTrack();if(tmpl&&tpos&&tMiss<=10){cc.strokeStyle='#4ade80';cc.lineWidth=2;const k=CW/TW;cc.strokeRect((tpos.x-tS/2)*k,(tpos.y-tS/2)*k,tS*k,tS*k)}}
+  if(trkMode()==='ai'&&!tmpl&&aiBox&&performance.now()-lastSeen<700){cc.strokeStyle='#ffd23f';cc.lineWidth=2;cc.strokeRect((aiBox.cx-aiBox.w/2)*CW,(aiBox.cy-aiBox.h/2)*CH,aiBox.w*CW,aiBox.h*CH)}
   // guides
   const y0=roiY()*CH;cc.fillStyle='rgba(0,0,0,.45)';cc.fillRect(0,0,CW,y0);
   cc.strokeStyle='rgba(255,255,255,.5)';cc.lineWidth=1;[CW/3,CW*2/3].forEach(x=>{cc.beginPath();cc.moveTo(x,y0);cc.lineTo(x,CH);cc.stroke()});
@@ -415,6 +466,8 @@ function frame(){
   }
 }
 requestAnimationFrame(frame);
+// testkrok (används av automatiska tester, påverkar inte spelet)
+window.__bb={st:()=>({running,waiting,paused,trackX,live:camActive(),tScore,tMiss,tS,lane,camOn,mode,stats:JSON.parse(JSON.stringify(stats)),T:running?now():0,next:(events.find(e=>!e.judged)||null),acState:ac&&ac.state}),setPointer:x=>{pointerX=x}};
 })();
 </script>
 </body>

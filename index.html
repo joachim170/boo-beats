@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Boo Beats</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;800&family=Inter:wght@400;600&display=swap">
+<style>
+/* Layout: helskärms-canvas (TV) + overlay-paneler. Medvetet ett mörkt spel-utseende. */
+:root{
+  --bg:#0b1020; --panel:#141b31; --line:#2a3558; --fg:#eef2ff; --muted:#93a0c6;
+  --pitch:#3fa34d; --accent:#ffd23f; --good:#4ade80; --bad:#f87171; --cue-red:#ef4444;
+  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);overflow:hidden;-webkit-user-select:none;user-select:none}
+#game{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(6,9,20,.78);overflow:auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px;width:min(760px,100%);display:grid;gap:18px}
+h1{font-family:var(--display);font-weight:800;font-size:clamp(40px,6vw,64px);letter-spacing:.02em;margin:0;line-height:.9;text-transform:uppercase}
+h1 span{color:var(--accent)}
+h2{font-family:var(--display);font-weight:600;font-size:22px;letter-spacing:.06em;text-transform:uppercase;margin:0;color:var(--muted)}
+p{margin:0;line-height:1.5;color:var(--muted);max-width:65ch}
+.modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.mode{background:transparent;border:1px solid var(--line);border-radius:10px;padding:12px;text-align:left;color:var(--fg);cursor:pointer;display:grid;gap:4px;font:inherit}
+.mode b{font-family:var(--display);font-size:20px;letter-spacing:.04em;text-transform:uppercase}
+.mode small{color:var(--muted);line-height:1.35}
+.mode[aria-pressed="true"]{border-color:var(--accent);background:rgba(255,210,63,.08)}
+.row{display:flex;flex-wrap:wrap;gap:14px;align-items:end}
+label{display:grid;gap:6px;font-size:13px;color:var(--muted);min-width:0}
+select,input[type=range]{font:inherit}
+select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.btn{font-family:var(--display);font-weight:800;font-size:22px;letter-spacing:.06em;text-transform:uppercase;border:0;border-radius:10px;padding:12px 22px;cursor:pointer;background:var(--accent);color:#1a1405}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.btn:focus-visible,.mode:focus-visible,select:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.rule{border-left:3px solid var(--accent);padding-left:12px}
+.rule p{color:var(--fg)}
+#cam{position:fixed;right:max(12px,env(safe-area-inset-right,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px));width:220px;border:1px solid var(--line);border-radius:10px;background:#000;cursor:crosshair;display:none}
+#camHint{position:fixed;right:max(12px,env(safe-area-inset-right,0px));bottom:calc(185px + env(safe-area-inset-bottom,0px));width:220px;font-size:12px;color:var(--fg);background:rgba(20,27,49,.92);border:1px solid var(--line);border-radius:8px;padding:8px;display:none;gap:6px}
+#camHint input,#camHint select{width:100%}
+#camHint label{font-size:11px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+.stat{border:1px solid var(--line);border-radius:10px;padding:12px}
+.stat b{display:block;font-family:var(--display);font-size:38px;line-height:1;font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.ver{font-size:13px;letter-spacing:.08em;text-transform:uppercase;margin-top:6px}
+.ver .vnum{color:var(--accent);font-weight:600}
+#quit{position:fixed;left:max(12px,env(safe-area-inset-left,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px));font-size:14px;padding:6px 12px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<canvas id="cam" width="240" height="180" aria-label="Kamerabild"></canvas>
+<div id="camHint">
+  <div id="trkStatus">Startar…</div><div style="color:var(--muted)">Boo Beats v<span class="vnum"></span></div>
+  <label for="trkMode">Spårning<select id="trkMode"><option value="ai">AI – hittar vilken boll som helst</option><option value="color">Färg – tryck på bollen</option></select></label>
+  <label for="sens">Känslighet<input id="sens" type="range" min="1" max="10" value="5"></label>
+  <label for="roi">Ignorera övre del av bilden<input id="roi" type="range" min="0" max="70" value="30"></label>
+</div>
+<button id="quit" class="btn ghost" hidden>Avsluta</button>
+
+<div class="overlay" id="menu">
+  <div class="card">
+    <div><h1>Boo <span>Beats</span></h1><p class="ver">Version <span class="vnum"></span></p></div>
+    <p>Dribbla till takten. Kameran följer bollen i sidled (vänster, mitten, höger). Var i rätt fil när porten når linjen. Utan kamera styr du med fingret, musen eller tangenterna A S D.</p>
+    <h2>Läge</h2>
+    <div class="modes" id="modes">
+      <button class="mode" data-mode="slalom" aria-pressed="true"><b>Rytm-slalom</b><small>Portar på takten. Ren teknik och tempo.</small></button>
+      <button class="mode" data-mode="pattern" aria-pressed="false"><b>Mönster</b><small>Länkade rörelsemönster, ett efter ett.</small></button>
+      <button class="mode" data-mode="color" aria-pressed="false"><b>Scanning</b><small>Färgsignal i ögonvrån avgör sidan.</small></button>
+      <button class="mode" data-mode="def" aria-pressed="false"><b>Läs försvararen</b><small>Han lutar åt ena hållet, du går åt andra.</small></button>
+      <button class="mode" data-mode="mix" aria-pressed="false"><b>Match-mix</b><small>Allt blandat, som i en riktig match.</small></button>
+    </div>
+    <div class="rule" id="ruleBox"><p id="ruleText"></p></div>
+    <div class="row">
+      <label for="bpm">Tempo (BPM)<select id="bpm"><option>80</option><option>90</option><option selected>100</option><option>110</option><option>120</option><option>130</option></select></label>
+      <label for="step">Täthet<select id="step"><option value="4">Var 4:e slag</option><option value="2" selected>Vartannat slag</option><option value="1">Varje slag</option></select></label>
+      <label for="reveal">Reaktionstid<select id="reveal"><option value="3">Lång (3 slag)</option><option value="2" selected>Normal (2 slag)</option><option value="1.5">Kort (1,5 slag)</option><option value="1">Match (1 slag)</option></select></label>
+      <label for="dur">Pass<select id="dur"><option value="45">45 s</option><option value="60" selected>60 s</option><option value="90">90 s</option><option value="120">2 min</option></select></label>
+    </div>
+    <div class="row">
+      <button class="btn ghost" id="camBtn">Starta kamera</button>
+      <label for="camSel" id="camSelWrap" hidden>Kamera<select id="camSel"></select></label>
+      <button class="btn" id="startBtn">Spela</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="result" hidden>
+  <div class="card">
+    <h1>Pass <span>klart</span></h1>
+    <div class="stats" id="stats"></div>
+    <p id="resNote"></p>
+    <div class="row"><button class="btn" id="againBtn">Kör igen</button><button class="btn ghost" id="menuBtn">Meny</button></div>
+  </div>
+</div>
+
+<script>
+(()=>{
+const VERSION='0.3';
+const $=id=>document.getElementById(id);
+document.querySelectorAll('.vnum').forEach(e=>e.textContent=VERSION);
+const cv=$('game'), g=cv.getContext('2d');
+const store={get(k,d){try{const v=localStorage.getItem('boobeats.'+k);return v==null?d:v}catch(e){return d}},set(k,v){try{localStorage.setItem('boobeats.'+k,v)}catch(e){}}};
+
+const RULES={
+  slalom:'Portarna kommer i takt. Ha bollen i den fil där porten är när den passerar den gula linjen.',
+  pattern:'Portarna bildar namngivna mönster som länkas ihop: Slalom, In–ut, Trappan, Croqueta-rytm, Dubbel. Mönstrets namn syns uppe till vänster.',
+  color:'Porten är dold. En färg blinkar vid skärmkanten. GRÖN = gå till den sidan. RÖD = gå till motsatt sida. Håll blicken upp.',
+  def:'En försvarare står i mitten. När han lutar och kliver åt ett håll, går du förbi på andra sidan. Vänta ut honom.',
+  mix:'Portar, mönster, färgsignaler och försvarare blandas. Grön = gå dit, röd = motsatt, försvarare = gå förbi på andra sidan.'
+};
+const PATTERNS=[
+  {n:'Slalom',s:[0,2,0,2]},
+  {n:'In–ut',s:[1,0,1,2]},
+  {n:'Trappan',s:[0,1,2,1]},
+  {n:'Croqueta-rytm',s:[1,0,2,1]},
+  {n:'Dubbel',s:[0,0,2,2]},
+  {n:'Fint & ut',s:[1,2,1,0]}
+];
+
+let mode=store.get('mode','slalom');
+function setMode(m){mode=m;store.set('mode',m);document.querySelectorAll('.mode').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mode===m));$('ruleText').textContent=RULES[m]}
+document.querySelectorAll('.mode').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+['bpm','step','reveal','dur'].forEach(id=>{const v=store.get(id,null);if(v)$(id).value=v;$(id).onchange=()=>store.set(id,$(id).value)});
+setMode(mode);
+
+/* ---------- Canvas sizing ---------- */
+let W=0,H=0,DPR=1;
+function resize(){DPR=Math.min(2,window.devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;g.setTransform(DPR,0,0,DPR,0,0)}
+addEventListener('resize',resize);resize();
+
+/* ---------- Input ---------- */
+let playerX=0.5, pointerX=0.5, lane=1;
+cv.addEventListener('pointermove',e=>{pointerX=Math.min(1,Math.max(0,e.clientX/W))});
+cv.addEventListener('pointerdown',e=>{pointerX=Math.min(1,Math.max(0,e.clientX/W))});
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(k==='a'||k==='arrowleft')pointerX=1/6;if(k==='s'||k==='arrowdown')pointerX=.5;if(k==='d'||k==='arrowright')pointerX=5/6;if(k==='escape'&&running)endGame()});
+
+/* ---------- Camera + tracking (AI eller färg) ---------- */
+const camCv=$('cam'), cc=camCv.getContext('2d',{willReadFrequently:true});
+const CW=240,CH=180;
+const video=document.createElement('video');video.playsInline=true;video.muted=true;video.setAttribute('playsinline','');
+let camOn=false, target=null, trackX=null, lastSeen=0, stream=null, aiModel=null, aiLoading=false, aiBusy=false, aiBox=null, aiFps=0, aiN=0, aiT=performance.now();
+const status=t=>{$('trkStatus').textContent=t};
+['trkMode','sens','roi'].forEach(id=>{const v=store.get(id,null);if(v)$(id).value=v;$(id).onchange=()=>{store.set(id,$(id).value);if(id==='trkMode')onModeChange()}});
+function trkMode(){return $('trkMode').value}
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('kunde inte ladda '+src));document.head.appendChild(s)})}
+async function loadAI(){
+  if(aiModel||aiLoading)return;aiLoading=true;status('Laddar AI-modell (första gången tar det 5–15 s)…');
+  try{
+    await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
+    await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js');
+    aiModel=await cocoSsd.load({base:'mobilenet_v2'});status('AI redo. Visa bollen för kameran.');aiLoop();
+  }catch(e){status('AI-modellen gick inte att ladda. Byt till Färg-spårning.');}
+  aiLoading=false;
+}
+function onModeChange(){trackX=null;aiBox=null;if(trkMode()==='ai'){loadAI();if(aiModel)status('AI redo. Visa bollen för kameran.')}else status(target?'Färg låst. Tryck på bollen för att kalibrera om.':'Tryck på bollen i kamerabilden för att låsa färgen.')}
+async function startCam(deviceId){
+  try{
+    if(stream)stream.getTracks().forEach(t=>t.stop());
+    const v=deviceId?{deviceId:{exact:deviceId},width:{ideal:640},height:{ideal:480}}:{facingMode:'user',width:{ideal:640},height:{ideal:480}};
+    stream=await navigator.mediaDevices.getUserMedia({video:v,audio:false});
+    video.srcObject=stream;await video.play();camOn=true;
+    camCv.style.display='block';$('camHint').style.display='grid';$('camBtn').textContent='Kamera på';
+    onModeChange();
+    const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+    if(devs.length>1){const s=$('camSel');const cur=s.value;s.innerHTML='';devs.forEach((d,i)=>{const o=document.createElement('option');o.value=d.deviceId;o.textContent=d.label||('Kamera '+(i+1));s.appendChild(o)});if(cur)s.value=cur;$('camSelWrap').hidden=false;s.onchange=()=>startCam(s.value)}
+  }catch(err){$('camBtn').textContent='Kameran nekades';$('ruleText').textContent='Kameran gick inte att starta här ('+(err.name||'fel')+'). Öppna sidan via https i Safari/Chrome och tillåt kameran. Du kan spela med finger/mus/A S D så länge.'}
+}
+$('camBtn').onclick=()=>startCam();
+function roiY(){return +$('roi').value/100}
+function setX(x){trackX=trackX==null?x:trackX*.4+x*.6;lastSeen=performance.now()}
+
+/* AI: COCO-SSD "sports ball" */
+async function aiLoop(){
+  if(!aiModel)return;
+  if(camOn&&trkMode()==='ai'&&!aiBusy&&video.readyState>=2){
+    aiBusy=true;
+    try{
+      const minScore=Math.max(.08,.6-(+$('sens').value)*.05);
+      const preds=await aiModel.detect(video,20,minScore);
+      const vw=video.videoWidth,vh=video.videoHeight;
+      let best=null,bestS=-1;
+      for(const p of preds){if(p.class!=='sports ball')continue;const[x,y,w,h]=p.bbox;const cx=1-(x+w/2)/vw,cy=(y+h/2)/vh;if(cy<roiY())continue;
+        let s=p.score;if(trackX!=null)s-=Math.abs(cx-trackX)*.5;if(s>bestS){bestS=s;best={cx,cy,w:w/vw,h:h/vh,score:p.score}}}
+      if(best){setX(best.cx);aiBox=best}else aiBox=null;
+      aiN++;const t=performance.now();if(t-aiT>1000){aiFps=aiN*1000/(t-aiT);aiN=0;aiT=t;status((camActive()?'Bollen hittad':'Letar efter bollen…')+' · '+aiFps.toFixed(0)+' bilder/s')}
+    }catch(e){}
+    aiBusy=false;
+  }
+  requestAnimationFrame(aiLoop);
+}
+
+/* Färg */
+function rgb2hsv(r,g2,b){r/=255;g2/=255;b/=255;const mx=Math.max(r,g2,b),mn=Math.min(r,g2,b),d=mx-mn;let h=0;if(d){if(mx===r)h=((g2-b)/d)%6;else if(mx===g2)h=(b-r)/d+2;else h=(r-g2)/d+4;h*=60;if(h<0)h+=360}return[h,mx?d/mx:0,mx]}
+camCv.addEventListener('pointerdown',e=>{
+  if(trkMode()!=='color'){$('trkMode').value='color';store.set('trkMode','color')}
+  const r=camCv.getBoundingClientRect();const x=Math.round((e.clientX-r.left)/r.width*CW),y=Math.round((e.clientY-r.top)/r.height*CH);
+  cc.save();cc.scale(-1,1);cc.drawImage(video,-CW,0,CW,CH);cc.restore();
+  const d=cc.getImageData(Math.max(0,x-3),Math.max(0,y-3),7,7).data;let R=0,G=0,B=0;for(let i=0;i<d.length;i+=4){R+=d[i];G+=d[i+1];B+=d[i+2]}const n=d.length/4;
+  target=rgb2hsv(R/n,G/n,B/n);trackX=null;
+  status(target[1]<.22?'Vit/grå boll låst. Funkar bäst mot mörkt golv; höj "ignorera övre del" så väggar inte stör.':'Färg låst. Tryck igen för att kalibrera om.');
+});
+function colorTrack(){
+  if(!target)return;
+  const img=cc.getImageData(0,0,CW,CH),d=img.data,sens=+$('sens').value,tol=6+sens*3.4,y0=Math.floor(roiY()*CH),white=target[1]<.22;
+  let sx=0,sy=0,n=0;
+  for(let y=y0;y<CH;y++)for(let x=0;x<CW;x++){const i=(y*CW+x)*4;const hsv=rgb2hsv(d[i],d[i+1],d[i+2]);let ok;
+    if(white)ok=hsv[1]<.18+sens*.015&&hsv[2]>target[2]*(.92-sens*.03);
+    else{let dh=Math.abs(hsv[0]-target[0]);if(dh>180)dh=360-dh;ok=dh<tol&&hsv[1]>target[1]*(.7-sens*.04)&&hsv[2]>.18}
+    if(ok){sx+=x;sy+=y;n++;d[i]=255;d[i+1]=40;d[i+2]=200}}
+  if(n>6){cc.putImageData(img,0,0);setX(sx/n/CW);drawMark(sx/n,sy/n,10)}
+}
+function drawMark(x,y,r){cc.strokeStyle='#ffd23f';cc.lineWidth=2;cc.beginPath();cc.arc(x,y,r,0,7);cc.stroke()}
+function track(){
+  if(!camOn||video.readyState<2)return;
+  cc.save();cc.scale(-1,1);cc.drawImage(video,-CW,0,CW,CH);cc.restore();
+  if(trkMode()==='color')colorTrack();
+  else if(aiBox&&performance.now()-lastSeen<400){cc.strokeStyle='#ffd23f';cc.lineWidth=2;cc.strokeRect((aiBox.cx-aiBox.w/2)*CW,(aiBox.cy-aiBox.h/2)*CH,aiBox.w*CW,aiBox.h*CH)}
+  // guides
+  const y0=roiY()*CH;cc.fillStyle='rgba(0,0,0,.45)';cc.fillRect(0,0,CW,y0);
+  cc.strokeStyle='rgba(255,255,255,.5)';cc.lineWidth=1;[CW/3,CW*2/3].forEach(x=>{cc.beginPath();cc.moveTo(x,y0);cc.lineTo(x,CH);cc.stroke()});
+  if(trackX!=null&&performance.now()-lastSeen<400){cc.fillStyle='#ffd23f';cc.fillRect(trackX*CW-2,CH-8,4,8)}
+}
+function camActive(){return camOn&&trackX!=null&&performance.now()-lastSeen<400}
+
+/* ---------- Audio ---------- */
+let ac=null;
+function tone(t,f0,f1,dur,vol,type='sine'){const o=ac.createOscillator(),gn=ac.createGain();o.type=type;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(f1,t+dur);gn.gain.setValueAtTime(vol,t);gn.gain.exponentialRampToValueAtTime(.001,t+dur);o.connect(gn).connect(ac.destination);o.start(t);o.stop(t+dur+.02)}
+function hat(t,vol){const len=ac.sampleRate*.04,b=ac.createBuffer(1,len,ac.sampleRate),c=b.getChannelData(0);for(let i=0;i<len;i++)c[i]=(Math.random()*2-1)*(1-i/len);const s=ac.createBufferSource(),f=ac.createBiquadFilter(),gn=ac.createGain();f.type='highpass';f.frequency.value=7000;gn.gain.value=vol;s.buffer=b;s.connect(f).connect(gn).connect(ac.destination);s.start(t)}
+
+/* ---------- Game state ---------- */
+let running=false,t0=0,bpm=100,beat=.6,lead=3.6,events=[],nextBeat=0,schedTimer=null,stats={},popups=[],flash=0,durS=60,COUNTIN=4,FIRST=8;
+function now(){return ac?ac.currentTime-t0:0}
+function build(){
+  bpm=+$('bpm').value;beat=60/bpm;lead=6*beat;durS=+$('dur').value;
+  const step=+$('step').value,rev=+$('reveal').value;events=[];
+  const total=Math.floor((durS/beat-FIRST)/step);let pi=0,pj=0;
+  for(let i=0;i<total;i++){
+    const t=(FIRST+i*step)*beat;let kind=mode,ev={t,judged:false,seen:false,reveal:rev*beat};
+    if(mode==='mix'){const r=Math.random();kind=r<.35?'slalom':r<.55?'pattern':r<.78?'color':'def'}
+    if(kind==='slalom'){ev.kind='gate';let l;do{l=Math.floor(Math.random()*3)}while(events.length&&l===events[events.length-1].lane&&Math.random()<.7);ev.lane=l}
+    else if(kind==='pattern'){const P=PATTERNS[pi%PATTERNS.length];ev.kind='gate';ev.lane=P.s[pj];ev.pattern=P.n;pj++;if(pj>=P.s.length){pj=0;pi++}}
+    else if(kind==='color'){ev.kind='color';ev.side=Math.random()<.5?0:2;ev.go=Math.random()<.6;ev.lane=ev.go?ev.side:2-ev.side}
+    else{ev.kind='def';ev.side=Math.random()<.5?0:2;ev.lane=2-ev.side}
+    events.push(ev);
+  }
+  stats={hits:0,miss:0,streak:0,best:0,score:0,byKind:{gate:[0,0],color:[0,0],def:[0,0]}};popups=[];
+}
+function start(){
+  if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();ac.resume();
+  build();$('menu').hidden=true;$('result').hidden=true;$('quit').hidden=false;
+  t0=ac.currentTime+.3;nextBeat=0;running=true;
+  clearInterval(schedTimer);schedTimer=setInterval(schedule,25);
+}
+function schedule(){
+  while(nextBeat*beat<now()+.12){
+    const t=t0+nextBeat*beat;
+    if(nextBeat<COUNTIN)tone(t,1200,900,.08,.25,'square');
+    else{tone(t,140,45,.18,.9);if(nextBeat%2)hat(t,.25);const isEv=events.some(e=>Math.abs(e.t-nextBeat*beat)<.01);if(isEv)hat(t,.5)}
+    nextBeat++;
+  }
+}
+function endGame(){
+  running=false;clearInterval(schedTimer);$('quit').hidden=true;
+  const tot=stats.hits+stats.miss,acc=tot?Math.round(stats.hits/tot*100):0;
+  const k=stats.byKind,pct=a=>a[0]+a[1]?Math.round(a[0]/(a[0]+a[1])*100)+' %':'–';
+  $('stats').innerHTML=[[stats.score,'Poäng'],[acc+' %','Träff'],[stats.best,'Bästa streak'],[pct(k.gate),'Teknik'],[pct(k.color),'Scanning'],[pct(k.def),'Läsa försvar']].map(s=>`<div class="stat"><b>${s[0]}</b><span>${s[1]}</span></div>`).join('');
+  $('resNote').textContent=acc>=85?'Starkt. Höj tempot eller korta reaktionstiden nästa pass.':acc>=60?'Bra grund. Kör samma inställning igen och jaga streaken.':'Sänk tempot ett steg eller välj längre reaktionstid och bygg upp det.';
+  $('result').hidden=false;
+}
+$('startBtn').onclick=start;$('againBtn').onclick=start;$('menuBtn').onclick=()=>{$('result').hidden=true;$('menu').hidden=false};$('quit').onclick=endGame;
+
+/* ---------- Judging ---------- */
+function judge(T){
+  const win=Math.min(.2,beat*.35);
+  for(const e of events){
+    if(e.judged)continue;if(e.t-T>win)break;
+    if(Math.abs(T-e.t)<=win&&lane===e.lane)e.seen=true;
+    if(T>e.t+win){e.judged=true;const kk=stats.byKind[e.kind];
+      if(e.seen){stats.hits++;stats.streak++;stats.best=Math.max(stats.best,stats.streak);stats.score+=100+stats.streak*10;kk[0]++;popups.push({txt:stats.streak>=10?'ON FIRE':stats.streak>=5?'PERFEKT':'BRA',lane:e.lane,t:T,c:'#4ade80'});tone(ac.currentTime,660,990,.09,.15,'triangle')}
+      else{stats.miss++;stats.streak=0;kk[1]++;popups.push({txt:'MISS',lane:e.lane,t:T,c:'#f87171'});flash=1;tone(ac.currentTime,220,110,.15,.15,'sawtooth')}}
+  }
+}
+
+/* ---------- Rendering ---------- */
+const K=5,pMin=1/(1+K);
+let horY,baseY,cx,halfW;
+function proj(z){const p=1/(1+K*Math.max(-.12,z));return{p,y:horY+(baseY-horY)*((p-pMin)/(1-pMin))}}
+const LC=[-2/3,0,2/3];
+function X(off,p){return cx+off*halfW*p}
+function drawCone(x,y,s){g.fillStyle='#ff8a2a';g.beginPath();g.moveTo(x,y-26*s);g.lineTo(x+9*s,y);g.lineTo(x-9*s,y);g.closePath();g.fill();g.fillStyle='#fff';g.fillRect(x-5*s,y-14*s,10*s,3*s);g.fillStyle='rgba(0,0,0,.25)';g.beginPath();g.ellipse(x,y+1*s,12*s,3*s,0,0,7);g.fill()}
+function drawGate(x,y,s,col,label){const w=halfW*.42*s/1.0,h=60*s;g.strokeStyle=col;g.lineWidth=Math.max(2,6*s);g.shadowColor=col;g.shadowBlur=18*s;g.beginPath();g.moveTo(x-w/2,y);g.lineTo(x-w/2,y-h);g.lineTo(x+w/2,y-h);g.lineTo(x+w/2,y);g.stroke();g.shadowBlur=0;if(label){g.fillStyle=col;g.font=`800 ${Math.max(10,40*s)}px ${getComputedStyle(document.documentElement).getPropertyValue('--display')}`;g.textAlign='center';g.fillText(label,x,y-h*.35)}}
+function drawDef(x,y,s,lean){g.save();g.translate(x,y);g.rotate(lean*.35);g.fillStyle='#e8553d';const bw=26*s,bh=70*s;g.beginPath();g.roundRect(-bw/2,-bh,bw,bh,bw/2);g.fill();g.beginPath();g.arc(0,-bh-12*s,12*s,0,7);g.fill();g.restore();g.fillStyle='rgba(0,0,0,.3)';g.beginPath();g.ellipse(x,y+2*s,22*s,5*s,0,0,7);g.fill()}
+
+function frame(){
+  requestAnimationFrame(frame);
+  track();
+  playerX=camActive()?trackX:pointerX;
+  const lx=playerX;if(lane===0&&lx>.37)lane=1;else if(lane===2&&lx<.63)lane=1;else if(lane===1){if(lx<.30)lane=0;else if(lx>.70)lane=2}
+  horY=H*.2;baseY=H*.86;cx=W/2;halfW=Math.min(W*.46,H*.95);
+  const T=running?now():0;
+  if(running){judge(T);if(T>durS+.4)endGame()}
+  // sky
+  const sky=g.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#0b1020');sky.addColorStop(1,'#1b2547');g.fillStyle=sky;g.fillRect(0,0,W,H);
+  // pitch
+  const top=proj(1),bot=proj(-.12);
+  g.fillStyle='#2f8a3c';g.beginPath();g.moveTo(X(-1,top.p),top.y);g.lineTo(X(1,top.p),top.y);g.lineTo(X(1,bot.p),bot.y);g.lineTo(X(-1,bot.p),bot.y);g.closePath();g.fill();
+  // beat stripes
+  if(running){const b0=Math.floor(T/beat);for(let k=b0;k<b0+8;k++){const z=(k*beat-T)/lead;if(z<-.12||z>1)continue;const q=proj(z);g.strokeStyle=k%4===0?'rgba(255,255,255,.22)':'rgba(255,255,255,.08)';g.lineWidth=k%4===0?2:1;g.beginPath();g.moveTo(X(-1,q.p),q.y);g.lineTo(X(1,q.p),q.y);g.stroke()}}
+  // lane lines
+  g.strokeStyle='rgba(255,255,255,.55)';g.lineWidth=2;[-1,-1/3,1/3,1].forEach(o=>{g.beginPath();g.moveTo(X(o,top.p),top.y);g.lineTo(X(o,bot.p),bot.y);g.stroke()});
+  // player lane highlight
+  const hl=proj(0);g.fillStyle='rgba(255,210,63,.13)';const lo=LC[lane];g.beginPath();g.moveTo(X(lo-1/3,top.p),top.y);g.lineTo(X(lo+1/3,top.p),top.y);g.lineTo(X(lo+1/3,bot.p),bot.y);g.lineTo(X(lo-1/3,bot.p),bot.y);g.closePath();g.fill();
+  // hit line (pulses on beat)
+  const ph=running?1-((T%beat)/beat):0;g.strokeStyle=`rgba(255,210,63,${.55+.45*ph})`;g.lineWidth=3+5*ph;g.beginPath();g.moveTo(X(-1,hl.p),hl.y);g.lineTo(X(1,hl.p),hl.y);g.stroke();
+  // events (far to near)
+  let cue=null;
+  if(running){
+    for(let i=events.length-1;i>=0;i--){const e=events[i];const z=(e.t-T)/lead;if(z>1||z<-.12)continue;const q=proj(z),s=q.p;const revealed=T>=e.t-e.reveal;const done=e.judged;
+      if(e.kind==='gate'){for(let l=0;l<3;l++)if(l!==e.lane)drawCone(X(LC[l],s),q.y,s*1.4);drawGate(X(LC[e.lane],s),q.y,s*1.4,done?(e.seen?'#4ade80':'#f87171'):'#ffffff')}
+      else if(e.kind==='color'){if(revealed&&!done&&T<=e.t)cue={side:e.side,c:e.go?'#22c55e':'#ef4444',a:1-Math.max(0,(T-(e.t-e.reveal))/e.reveal)*.4};
+        if(done)drawGate(X(LC[e.lane],s),q.y,s*1.4,e.seen?'#4ade80':'#f87171');else for(let l=0;l<3;l++)drawGate(X(LC[l],s),q.y,s*1.4,'rgba(200,210,240,.45)',l===1?'?':'')}
+      else{const prog=revealed?Math.min(1,(T-(e.t-e.reveal))/(e.reveal*.5)):0;const dir=e.side===0?-1:1;drawDef(X(dir*prog*.5*(2/3),s),q.y,s*1.4,dir*prog);
+        if(done)drawGate(X(LC[e.lane],s),q.y,s*1.4,e.seen?'#4ade80':'#f87171')}
+    }
+  }
+  // peripheral colour cue
+  if(cue){const w=Math.max(40,W*.07);g.fillStyle=cue.c;g.globalAlpha=cue.a;g.fillRect(cue.side===0?0:W-w,0,w,H);g.globalAlpha=1}
+  // ball
+  const bx=cx+(playerX*2-1)*halfW*hl.p*.95,by=hl.y+18;g.fillStyle='rgba(0,0,0,.35)';g.beginPath();g.ellipse(bx,by+14,22,6,0,0,7);g.fill();
+  g.fillStyle='#fff';g.beginPath();g.arc(bx,by,18,0,7);g.fill();g.fillStyle='#111';g.beginPath();g.arc(bx,by,6,0,7);g.fill();
+  // popups
+  const disp=getComputedStyle(document.documentElement).getPropertyValue('--display');
+  popups=popups.filter(p=>T-p.t<.8);popups.forEach(p=>{const a=1-(T-p.t)/.8;g.globalAlpha=a;g.fillStyle=p.c;g.font=`800 ${Math.round(H*.05)}px ${disp}`;g.textAlign='center';g.fillText(p.txt,X(LC[p.lane],hl.p),hl.y-40-(1-a)*40);g.globalAlpha=1});
+  if(flash>0){g.fillStyle=`rgba(248,113,113,${flash*.18})`;g.fillRect(0,0,W,H);flash=Math.max(0,flash-.05)}
+  // HUD
+  if(running){
+    const nextEv=events.find(e=>!e.judged);const label=mode==='pattern'&&nextEv?nextEv.pattern:{slalom:'Rytm-slalom',pattern:'Mönster',color:'Scanning',def:'Läs försvararen',mix:'Match-mix'}[mode];
+    g.textAlign='left';g.fillStyle='#93a0c6';g.font=`600 ${Math.round(H*.028)}px ${disp}`;g.fillText(label.toUpperCase()+'  ·  '+bpm+' BPM  ·  V'+VERSION,24,H*.06);
+    g.fillStyle='#eef2ff';g.font=`800 ${Math.round(H*.06)}px ${disp}`;g.fillText(stats.score,24,H*.06+H*.065);
+    g.textAlign='right';g.fillStyle=stats.streak>=5?'#ffd23f':'#eef2ff';g.fillText(stats.streak+'x',W-24,H*.06+H*.065);g.fillStyle='#93a0c6';g.font=`600 ${Math.round(H*.028)}px ${disp}`;g.fillText('STREAK  ·  '+Math.max(0,Math.ceil(durS-T))+' S',W-24,H*.06);
+    if(T<COUNTIN*beat){g.textAlign='center';g.fillStyle='#ffd23f';g.font=`800 ${Math.round(H*.18)}px ${disp}`;g.fillText(COUNTIN-Math.floor(T/beat),cx,H*.5)}
+    if(camOn&&!camActive()){g.textAlign='center';g.fillStyle='#f87171';g.font=`600 ${Math.round(H*.026)}px ${disp}`;g.fillText(trkMode()==='color'&&!target?'TRYCK PÅ BOLLEN I KAMERABILDEN':'BOLLEN SYNS INTE',cx,H*.13)}
+  }
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

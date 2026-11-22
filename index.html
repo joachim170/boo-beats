@@ -44,6 +44,7 @@ select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-
 #cam{width:min(320px,100%);max-width:100%;border:1px solid var(--line);border-radius:10px;background:#000;cursor:crosshair}
 #cam.mini{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);width:96px;opacity:.85;z-index:5;cursor:pointer}
 #cam.mini.off{opacity:.15}
+#cam.mini.big{width:min(300px,80vw);top:calc(70px + env(safe-area-inset-top,0px));opacity:1;cursor:crosshair}
 #trkStatus{font-size:13px;color:var(--muted)}
 details{border-top:1px solid var(--line);padding-top:12px}
 summary{cursor:pointer;font-family:var(--display);font-weight:600;font-size:18px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
@@ -112,7 +113,7 @@ summary{cursor:pointer;font-family:var(--display);font-weight:600;font-size:18px
 
 <script>
 (()=>{
-const VERSION='0.6';
+const VERSION='0.7';
 const $=id=>document.getElementById(id);
 document.querySelectorAll('.vnum').forEach(e=>e.textContent=VERSION);
 const cv=$('game'), g=cv.getContext('2d');
@@ -157,6 +158,7 @@ const CW=240,CH=180;
 const video=document.createElement('video');video.playsInline=true;video.muted=true;video.setAttribute('playsinline','');
 let camOn=false, target=null, trackX=null, lastSeen=0, stream=null, aiModel=null, aiLoading=false, aiBusy=false, aiBox=null, aiFps=0, aiN=0, aiT=performance.now();
 const status=t=>{$('trkStatus').textContent=t};
+if(store.get('ver','')!==VERSION){store.set('trkMode','ai');store.set('ver',VERSION)}
 ['trkMode','sens','roi'].forEach(id=>{const v=store.get(id,null);if(v)$(id).value=v;$(id).onchange=()=>{store.set(id,$(id).value);if(id==='trkMode')onModeChange()}});
 function trkMode(){return $('trkMode').value}
 function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('kunde inte ladda '+src));document.head.appendChild(s)})}
@@ -185,7 +187,7 @@ async function startCam(deviceId){
 $('camBtn').onclick=()=>startCam();
 if(store.get('camWanted','0')==='1'&&navigator.mediaDevices)startCam();
 function camToGame(){if(!camOn)return;camCv.classList.add('mini');document.body.appendChild(camCv)}
-function camToMenu(){camCv.classList.remove('mini','off');$('camSlot').prepend(camCv)}
+function camToMenu(){camCv.classList.remove('mini','off','big');$('camSlot').prepend(camCv)}
 function roiY(){return +$('roi').value/100}
 function setX(x){trackX=trackX==null?x:trackX*.4+x*.6;lastSeen=performance.now()}
 
@@ -284,7 +286,7 @@ function templateTrack(){
 /* Färg */
 function rgb2hsv(r,g2,b){r/=255;g2/=255;b/=255;const mx=Math.max(r,g2,b),mn=Math.min(r,g2,b),d=mx-mn;let h=0;if(d){if(mx===r)h=((g2-b)/d)%6;else if(mx===g2)h=(b-r)/d+2;else h=(r-g2)/d+4;h*=60;if(h<0)h+=360}return[h,mx?d/mx:0,mx]}
 camCv.addEventListener('pointerdown',e=>{
-  if(camCv.classList.contains('mini')){camCv.classList.toggle('off');return}
+  if(camCv.classList.contains('mini')&&!camCv.classList.contains('big')){camCv.classList.toggle('off');return}
   const r=camCv.getBoundingClientRect();const x=Math.round((e.clientX-r.left)/r.width*CW),y=Math.round((e.clientY-r.top)/r.height*CH);
   if(trkMode()==='ai'){const g0=grayFrame();if(g0){seedAt(x/CW*TW,y/CH*TH,null,g0);status('Bollen låst – följer den nu. Tryck igen om den tappas.')}return}
   cc.save();cc.scale(-1,1);cc.drawImage(video,-CW,0,CW,CH);cc.restore();
@@ -340,6 +342,7 @@ function build(){
   stats={hits:0,miss:0,streak:0,best:0,score:0,byKind:{gate:[0,0],color:[0,0],def:[0,0]}};popups=[];
 }
 function start(){
+  camCv.classList.remove('big');
   waiting=false;paused=false;lostMs=0;
   if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();ac.resume();
   build();$('menu').hidden=true;$('result').hidden=true;$('quit').hidden=false;
@@ -367,7 +370,7 @@ let waiting=false,holdMs=0,lostMs=0,paused=false,lastF=performance.now();
 function play(){
   if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();ac.resume();
   camToGame();$('menu').hidden=true;$('result').hidden=true;$('quit').hidden=false;
-  if(gateOn()){waiting=true;holdMs=0;running=false}else start();
+  if(gateOn()){waiting=true;holdMs=0;running=false;camCv.classList.add('big')}else start();
 }
 $('startBtn').onclick=play;$('againBtn').onclick=play;
 $('menuBtn').onclick=()=>{$('result').hidden=true;$('menu').hidden=false;camToMenu()};
@@ -458,11 +461,11 @@ function frame(){
   }
   if(waiting||paused){
     g.fillStyle='rgba(6,9,20,.55)';g.fillRect(0,0,W,H);g.textAlign='center';
-    const big=Math.round(Math.min(W*.09,H*.07));
+    const big=Math.round(Math.min(W*.09,H*.07)),ty=Math.max(H*.45,camCv.classList.contains('big')?camCv.getBoundingClientRect().bottom+big*1.4:0);
     const fit=(txt,w,size,y,col)=>{g.font=`${w} ${size}px ${disp}`;const m=g.measureText(txt).width,mx=W*.9;if(m>mx){size=Math.floor(size*mx/m);g.font=`${w} ${size}px ${disp}`}g.fillStyle=col;g.fillText(txt,cx,y)};
-    fit(paused?(camActive()?'FORTSÄTTER…':'PAUS – VISA BOLLEN'):(camActive()?(lane===1?'HÅLL BOLLEN STILL…':'FLYTTA BOLLEN TILL MITTEN'):'VISA BOLLEN FÖR KAMERAN'),800,big,H*.45,'#ffd23f');
-    fit(paused?'Spelet fortsätter när kameran ser bollen igen':'Spelet startar när bollen ligger i mitten i 1 sekund',600,Math.round(big*.45),H*.45+big*.9,'#eef2ff');
-    const need=paused?500:1000,pr=Math.min(1,holdMs/need);if(pr>0){g.strokeStyle='#4ade80';g.lineWidth=8;g.beginPath();g.arc(cx,H*.62,big*.8,-Math.PI/2,-Math.PI/2+pr*Math.PI*2);g.stroke()}
+    fit(paused?(camActive()?'FORTSÄTTER…':'PAUS – VISA BOLLEN'):(camActive()?(lane===1?'HÅLL BOLLEN STILL…':'FLYTTA BOLLEN TILL MITTEN'):'TRYCK PÅ BOLLEN I BILDEN'),800,big,ty,'#ffd23f');
+    fit(paused?'Spelet fortsätter när kameran ser bollen igen':(camActive()?'Spelet startar när bollen ligger i mitten i 1 sekund':'Då låses den med en grön ruta'),600,Math.round(big*.45),ty+big*.9,'#eef2ff');
+    const need=paused?500:1000,pr=Math.min(1,holdMs/need);if(pr>0){g.strokeStyle='#4ade80';g.lineWidth=8;g.beginPath();g.arc(cx,ty+big*2.6,big*.8,-Math.PI/2,-Math.PI/2+pr*Math.PI*2);g.stroke()}
   }
 }
 requestAnimationFrame(frame);

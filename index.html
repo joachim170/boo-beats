@@ -40,10 +40,16 @@ select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-
 .btn:focus-visible,.mode:focus-visible,select:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .rule{border-left:3px solid var(--accent);padding-left:12px}
 .rule p{color:var(--fg)}
-#cam{position:fixed;right:max(12px,env(safe-area-inset-right,0px));bottom:calc(12px + env(safe-area-inset-bottom,0px));width:220px;border:1px solid var(--line);border-radius:10px;background:#000;cursor:crosshair;display:none}
-#camHint{position:fixed;right:max(12px,env(safe-area-inset-right,0px));bottom:calc(185px + env(safe-area-inset-bottom,0px));width:220px;font-size:12px;color:var(--fg);background:rgba(20,27,49,.92);border:1px solid var(--line);border-radius:8px;padding:8px;display:none;gap:6px}
-#camHint input,#camHint select{width:100%}
-#camHint label{font-size:11px}
+#camSlot{display:grid;gap:8px;justify-items:start}
+#cam{width:min(320px,100%);max-width:100%;border:1px solid var(--line);border-radius:10px;background:#000;cursor:crosshair}
+#cam.mini{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);width:96px;opacity:.85;z-index:5;cursor:pointer}
+#cam.mini.off{opacity:.15}
+#trkStatus{font-size:13px;color:var(--muted)}
+details{border-top:1px solid var(--line);padding-top:12px}
+summary{cursor:pointer;font-family:var(--display);font-weight:600;font-size:18px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.advgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-top:14px}
+.advgrid select,.advgrid input{width:100%}
+.small{font-size:13px;margin-top:12px}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
 .stat{border:1px solid var(--line);border-radius:10px;padding:12px}
 .stat b{display:block;font-family:var(--display);font-size:38px;line-height:1;font-variant-numeric:tabular-nums}
@@ -56,20 +62,11 @@ select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-
 </head>
 <body>
 <canvas id="game"></canvas>
-<canvas id="cam" width="240" height="180" aria-label="Kamerabild"></canvas>
-<div id="camHint">
-  <div id="trkStatus">Startar…</div><div style="color:var(--muted)">Boo Beats v<span class="vnum"></span></div>
-  <label for="trkMode">Spårning<select id="trkMode"><option value="ai">AI – hittar vilken boll som helst</option><option value="color">Färg – tryck på bollen</option></select></label>
-  <label for="sens">Känslighet<input id="sens" type="range" min="1" max="10" value="5"></label>
-  <label for="roi">Ignorera övre del av bilden<input id="roi" type="range" min="0" max="70" value="30"></label>
-</div>
 <button id="quit" class="btn ghost" hidden>Avsluta</button>
 
 <div class="overlay" id="menu">
   <div class="card">
     <div><h1>Boo <span>Beats</span></h1><p class="ver">Version <span class="vnum"></span></p></div>
-    <p>Dribbla till takten. Kameran följer bollen i sidled (vänster, mitten, höger). Var i rätt fil när porten når linjen. Utan kamera styr du med fingret, musen eller tangenterna A S D.</p>
-    <h2>Läge</h2>
     <div class="modes" id="modes">
       <button class="mode" data-mode="slalom" aria-pressed="true"><b>Rytm-slalom</b><small>Portar på takten. Ren teknik och tempo.</small></button>
       <button class="mode" data-mode="pattern" aria-pressed="false"><b>Mönster</b><small>Länkade rörelsemönster, ett efter ett.</small></button>
@@ -78,17 +75,29 @@ select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-
       <button class="mode" data-mode="mix" aria-pressed="false"><b>Match-mix</b><small>Allt blandat, som i en riktig match.</small></button>
     </div>
     <div class="rule" id="ruleBox"><p id="ruleText"></p></div>
-    <div class="row">
-      <label for="bpm">Tempo (BPM)<select id="bpm"><option>80</option><option>90</option><option selected>100</option><option>110</option><option>120</option><option>130</option></select></label>
-      <label for="step">Täthet<select id="step"><option value="4">Var 4:e slag</option><option value="2" selected>Vartannat slag</option><option value="1">Varje slag</option></select></label>
-      <label for="reveal">Reaktionstid<select id="reveal"><option value="3">Lång (3 slag)</option><option value="2" selected>Normal (2 slag)</option><option value="1.5">Kort (1,5 slag)</option><option value="1">Match (1 slag)</option></select></label>
-      <label for="dur">Pass<select id="dur"><option value="45">45 s</option><option value="60" selected>60 s</option><option value="90">90 s</option><option value="120">2 min</option></select></label>
+    <div id="camSlot" hidden>
+      <canvas id="cam" width="240" height="180" aria-label="Kamerabild"></canvas>
+      <div id="trkStatus">Startar…</div>
     </div>
     <div class="row">
       <button class="btn ghost" id="camBtn">Starta kamera</button>
-      <label for="camSel" id="camSelWrap" hidden>Kamera<select id="camSel"></select></label>
       <button class="btn" id="startBtn">Spela</button>
     </div>
+    <details id="adv">
+      <summary>Inställningar</summary>
+      <div class="advgrid">
+        <label for="bpm">Tempo (BPM)<select id="bpm"><option>80</option><option>90</option><option selected>100</option><option>110</option><option>120</option><option>130</option></select></label>
+        <label for="step">Täthet<select id="step"><option value="4">Var 4:e slag</option><option value="2" selected>Vartannat slag</option><option value="1">Varje slag</option></select></label>
+        <label for="reveal">Reaktionstid<select id="reveal"><option value="3">Lång (3 slag)</option><option value="2" selected>Normal (2 slag)</option><option value="1.5">Kort (1,5 slag)</option><option value="1">Match (1 slag)</option></select></label>
+        <label for="dur">Pass<select id="dur"><option value="45">45 s</option><option value="60" selected>60 s</option><option value="90">90 s</option><option value="120">2 min</option></select></label>
+        <label for="trkMode">Spårning<select id="trkMode"><option value="ai">AI – vilken boll som helst</option><option value="color">Färg – tryck på bollen</option></select></label>
+        <label for="camSel" id="camSelWrap" hidden>Kamera<select id="camSel"></select></label>
+        <label for="sens">Känslighet<input id="sens" type="range" min="1" max="10" value="5"></label>
+        <label for="roi">Ignorera övre del av bilden<input id="roi" type="range" min="0" max="70" value="30"></label>
+        <label for="gate"><span>Starta och pausa på bollen</span><select id="gate"><option value="1">På – spelet väntar tills bollen syns</option><option value="0">Av</option></select></label>
+      </div>
+      <p class="small">Utan kamera styr du med fingret, musen eller A S D.</p>
+    </details>
   </div>
 </div>
 
@@ -103,7 +112,7 @@ select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-
 
 <script>
 (()=>{
-const VERSION='0.3';
+const VERSION='0.4';
 const $=id=>document.getElementById(id);
 document.querySelectorAll('.vnum').forEach(e=>e.textContent=VERSION);
 const cv=$('game'), g=cv.getContext('2d');
@@ -128,7 +137,7 @@ const PATTERNS=[
 let mode=store.get('mode','slalom');
 function setMode(m){mode=m;store.set('mode',m);document.querySelectorAll('.mode').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mode===m));$('ruleText').textContent=RULES[m]}
 document.querySelectorAll('.mode').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
-['bpm','step','reveal','dur'].forEach(id=>{const v=store.get(id,null);if(v)$(id).value=v;$(id).onchange=()=>store.set(id,$(id).value)});
+['bpm','step','reveal','dur','gate'].forEach(id=>{const v=store.get(id,null);if(v)$(id).value=v;$(id).onchange=()=>store.set(id,$(id).value)});
 setMode(mode);
 
 /* ---------- Canvas sizing ---------- */
@@ -167,13 +176,16 @@ async function startCam(deviceId){
     const v=deviceId?{deviceId:{exact:deviceId},width:{ideal:640},height:{ideal:480}}:{facingMode:'user',width:{ideal:640},height:{ideal:480}};
     stream=await navigator.mediaDevices.getUserMedia({video:v,audio:false});
     video.srcObject=stream;await video.play();camOn=true;
-    camCv.style.display='block';$('camHint').style.display='grid';$('camBtn').textContent='Kamera på';
+    $('camSlot').hidden=false;$('camBtn').textContent='Kamera på';store.set('camWanted','1');
     onModeChange();
     const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
     if(devs.length>1){const s=$('camSel');const cur=s.value;s.innerHTML='';devs.forEach((d,i)=>{const o=document.createElement('option');o.value=d.deviceId;o.textContent=d.label||('Kamera '+(i+1));s.appendChild(o)});if(cur)s.value=cur;$('camSelWrap').hidden=false;s.onchange=()=>startCam(s.value)}
   }catch(err){$('camBtn').textContent='Kameran nekades';$('ruleText').textContent='Kameran gick inte att starta här ('+(err.name||'fel')+'). Öppna sidan via https i Safari/Chrome och tillåt kameran. Du kan spela med finger/mus/A S D så länge.'}
 }
 $('camBtn').onclick=()=>startCam();
+if(store.get('camWanted','0')==='1'&&navigator.mediaDevices)startCam();
+function camToGame(){if(!camOn)return;camCv.classList.add('mini');document.body.appendChild(camCv)}
+function camToMenu(){camCv.classList.remove('mini','off');$('camSlot').prepend(camCv)}
 function roiY(){return +$('roi').value/100}
 function setX(x){trackX=trackX==null?x:trackX*.4+x*.6;lastSeen=performance.now()}
 
@@ -200,6 +212,7 @@ async function aiLoop(){
 /* Färg */
 function rgb2hsv(r,g2,b){r/=255;g2/=255;b/=255;const mx=Math.max(r,g2,b),mn=Math.min(r,g2,b),d=mx-mn;let h=0;if(d){if(mx===r)h=((g2-b)/d)%6;else if(mx===g2)h=(b-r)/d+2;else h=(r-g2)/d+4;h*=60;if(h<0)h+=360}return[h,mx?d/mx:0,mx]}
 camCv.addEventListener('pointerdown',e=>{
+  if(camCv.classList.contains('mini')){camCv.classList.toggle('off');return}
   if(trkMode()!=='color'){$('trkMode').value='color';store.set('trkMode','color')}
   const r=camCv.getBoundingClientRect();const x=Math.round((e.clientX-r.left)/r.width*CW),y=Math.round((e.clientY-r.top)/r.height*CH);
   cc.save();cc.scale(-1,1);cc.drawImage(video,-CW,0,CW,CH);cc.restore();
@@ -254,6 +267,7 @@ function build(){
   stats={hits:0,miss:0,streak:0,best:0,score:0,byKind:{gate:[0,0],color:[0,0],def:[0,0]}};popups=[];
 }
 function start(){
+  waiting=false;paused=false;lostMs=0;
   if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();ac.resume();
   build();$('menu').hidden=true;$('result').hidden=true;$('quit').hidden=false;
   t0=ac.currentTime+.3;nextBeat=0;running=true;
@@ -275,7 +289,16 @@ function endGame(){
   $('resNote').textContent=acc>=85?'Starkt. Höj tempot eller korta reaktionstiden nästa pass.':acc>=60?'Bra grund. Kör samma inställning igen och jaga streaken.':'Sänk tempot ett steg eller välj längre reaktionstid och bygg upp det.';
   $('result').hidden=false;
 }
-$('startBtn').onclick=start;$('againBtn').onclick=start;$('menuBtn').onclick=()=>{$('result').hidden=true;$('menu').hidden=false};$('quit').onclick=endGame;
+function gateOn(){return camOn&&$('gate').value==='1'}
+let waiting=false,holdMs=0,lostMs=0,paused=false,lastF=performance.now();
+function play(){
+  if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();ac.resume();
+  camToGame();$('menu').hidden=true;$('result').hidden=true;$('quit').hidden=false;
+  if(gateOn()){waiting=true;holdMs=0;running=false}else start();
+}
+$('startBtn').onclick=play;$('againBtn').onclick=play;
+$('menuBtn').onclick=()=>{$('result').hidden=true;$('menu').hidden=false;camToMenu()};
+$('quit').onclick=()=>{if(waiting){waiting=false;$('quit').hidden=true;$('menu').hidden=false;camToMenu();return}if(paused){ac.resume();paused=false}endGame()};
 
 /* ---------- Judging ---------- */
 function judge(T){
@@ -305,6 +328,12 @@ function frame(){
   playerX=camActive()?trackX:pointerX;
   const lx=playerX;if(lane===0&&lx>.37)lane=1;else if(lane===2&&lx<.63)lane=1;else if(lane===1){if(lx<.30)lane=0;else if(lx>.70)lane=2}
   horY=H*.2;baseY=H*.86;cx=W/2;halfW=Math.min(W*.46,H*.95);
+  const tNow=performance.now(),dt=Math.min(100,tNow-lastF);lastF=tNow;
+  if(waiting){if(camActive()&&lane===1){holdMs+=dt;if(holdMs>=1000)start()}else holdMs=Math.max(0,holdMs-dt*2)}
+  if(running&&gateOn()){
+    if(!camActive()){lostMs+=dt;if(!paused&&lostMs>800&&ac.state==='running'){ac.suspend();paused=true;holdMs=0}}
+    else{lostMs=0;if(paused){holdMs+=dt;if(holdMs>=500){ac.resume();paused=false}}}
+  }
   const T=running?now():0;
   if(running){judge(T);if(T>durS+.4)endGame()}
   // sky
@@ -343,11 +372,24 @@ function frame(){
   // HUD
   if(running){
     const nextEv=events.find(e=>!e.judged);const label=mode==='pattern'&&nextEv?nextEv.pattern:{slalom:'Rytm-slalom',pattern:'Mönster',color:'Scanning',def:'Läs försvararen',mix:'Match-mix'}[mode];
-    g.textAlign='left';g.fillStyle='#93a0c6';g.font=`600 ${Math.round(H*.028)}px ${disp}`;g.fillText(label.toUpperCase()+'  ·  '+bpm+' BPM  ·  V'+VERSION,24,H*.06);
-    g.fillStyle='#eef2ff';g.font=`800 ${Math.round(H*.06)}px ${disp}`;g.fillText(stats.score,24,H*.06+H*.065);
-    g.textAlign='right';g.fillStyle=stats.streak>=5?'#ffd23f':'#eef2ff';g.fillText(stats.streak+'x',W-24,H*.06+H*.065);g.fillStyle='#93a0c6';g.font=`600 ${Math.round(H*.028)}px ${disp}`;g.fillText('STREAK  ·  '+Math.max(0,Math.ceil(durS-T))+' S',W-24,H*.06);
+    const side=Math.max(60,W/2-64),small=Math.round(Math.min(H*.028,W*.045)),bigS=Math.round(Math.min(H*.06,W*.1));
+    const put=(txt,x,y,al,w,size,col)=>{g.textAlign=al;g.font=`${w} ${size}px ${disp}`;const m=g.measureText(txt).width;if(m>side-16){g.font=`${w} ${Math.floor(size*(side-16)/m)}px ${disp}`}g.fillStyle=col;g.fillText(txt,x,y)};
+    const top=H*.05+small;
+    put(label.toUpperCase(),16,top,'left',600,small,'#93a0c6');
+    put(String(stats.score),16,top+bigS,'left',800,bigS,'#eef2ff');
+    put(Math.max(0,Math.ceil(durS-T))+' S · STREAK',W-16,top,'right',600,small,'#93a0c6');
+    put(stats.streak+'x',W-16,top+bigS,'right',800,bigS,stats.streak>=5?'#ffd23f':'#eef2ff');
+    g.textAlign='right';g.fillStyle='rgba(147,160,198,.6)';g.font=`600 12px ${disp}`;g.fillText('V'+VERSION+' · '+bpm+' BPM',W-16,H-16);
     if(T<COUNTIN*beat){g.textAlign='center';g.fillStyle='#ffd23f';g.font=`800 ${Math.round(H*.18)}px ${disp}`;g.fillText(COUNTIN-Math.floor(T/beat),cx,H*.5)}
-    if(camOn&&!camActive()){g.textAlign='center';g.fillStyle='#f87171';g.font=`600 ${Math.round(H*.026)}px ${disp}`;g.fillText(trkMode()==='color'&&!target?'TRYCK PÅ BOLLEN I KAMERABILDEN':'BOLLEN SYNS INTE',cx,H*.13)}
+    if(camOn&&!camActive()&&!paused&&!gateOn()){g.textAlign='center';g.fillStyle='#f87171';g.font=`600 ${Math.round(H*.026)}px ${disp}`;g.fillText('BOLLEN SYNS INTE',cx,H*.2)}
+  }
+  if(waiting||paused){
+    g.fillStyle='rgba(6,9,20,.55)';g.fillRect(0,0,W,H);g.textAlign='center';
+    const big=Math.round(Math.min(W*.09,H*.07));
+    const fit=(txt,w,size,y,col)=>{g.font=`${w} ${size}px ${disp}`;const m=g.measureText(txt).width,mx=W*.9;if(m>mx){size=Math.floor(size*mx/m);g.font=`${w} ${size}px ${disp}`}g.fillStyle=col;g.fillText(txt,cx,y)};
+    fit(paused?(camActive()?'FORTSÄTTER…':'PAUS – VISA BOLLEN'):(camActive()?(lane===1?'HÅLL BOLLEN STILL…':'FLYTTA BOLLEN TILL MITTEN'):'VISA BOLLEN FÖR KAMERAN'),800,big,H*.45,'#ffd23f');
+    fit(paused?'Spelet fortsätter när kameran ser bollen igen':'Spelet startar när bollen ligger i mitten i 1 sekund',600,Math.round(big*.45),H*.45+big*.9,'#eef2ff');
+    const need=paused?500:1000,pr=Math.min(1,holdMs/need);if(pr>0){g.strokeStyle='#4ade80';g.lineWidth=8;g.beginPath();g.arc(cx,H*.62,big*.8,-Math.PI/2,-Math.PI/2+pr*Math.PI*2);g.stroke()}
   }
 }
 requestAnimationFrame(frame);

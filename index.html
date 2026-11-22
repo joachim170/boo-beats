@@ -112,7 +112,7 @@ summary{cursor:pointer;font-family:var(--display);font-weight:600;font-size:18px
 
 <script>
 (()=>{
-const VERSION='0.4';
+const VERSION='0.5';
 const $=id=>document.getElementById(id);
 document.querySelectorAll('.vnum').forEach(e=>e.textContent=VERSION);
 const cv=$('game'), g=cv.getContext('2d');
@@ -189,19 +189,41 @@ function camToMenu(){camCv.classList.remove('mini','off');$('camSlot').prepend(c
 function roiY(){return +$('roi').value/100}
 function setX(x){trackX=trackX==null?x:trackX*.4+x*.6;lastSeen=performance.now()}
 
-/* AI: COCO-SSD "sports ball" */
+/* AI: COCO-SSD "sports ball" – med zoom runt bollen och rutor när den tappas */
+const zc=document.createElement('canvas');zc.width=zc.height=320;const zx=zc.getContext('2d');
+let tile=0,missN=0;
+async function detectRegion(sx,sy,sw,sh,minScore){
+  // ritar en del av videon till 320x320 och kör detektorn där; returnerar bollar i videokoordinater
+  zx.drawImage(video,sx,sy,sw,sh,0,0,320,320);
+  const preds=await aiModel.detect(zc,10,minScore);
+  return preds.filter(p=>p.class==='sports ball').map(p=>{const[x,y,w,h]=p.bbox;return{x:sx+x*sw/320,y:sy+y*sh/320,w:w*sw/320,h:h*sh/320,score:p.score}});
+}
 async function aiLoop(){
   if(!aiModel)return;
   if(camOn&&trkMode()==='ai'&&!aiBusy&&video.readyState>=2){
     aiBusy=true;
     try{
-      const minScore=Math.max(.08,.6-(+$('sens').value)*.05);
-      const preds=await aiModel.detect(video,20,minScore);
-      const vw=video.videoWidth,vh=video.videoHeight;
+      const vw=video.videoWidth,vh=video.videoHeight,y0=roiY()*vh,sens=+$('sens').value;
+      const minScore=Math.max(.08,.55-sens*.05);
+      let hits=[];
+      const recent=aiBox&&performance.now()-lastSeen<1500;
+      if(recent){
+        // zooma in runt senaste positionen – bollen blir stor för detektorn
+        const px=(1-aiBox.cx)*vw,py=aiBox.cy*vh,bs=Math.max(aiBox.w*vw,aiBox.h*vh);
+        const S=Math.min(Math.min(vw,vh),Math.max(140,bs*6));
+        const sx=Math.max(0,Math.min(vw-S,px-S/2)),sy=Math.max(0,Math.min(vh-S,py-S/2));
+        hits=await detectRegion(sx,sy,S,S,minScore*.7);
+      }
+      if(!hits.length){
+        // hela nedre delen, eller en av tre överlappande rutor för små/avlägsna bollar
+        const rh=vh-y0;
+        if(missN%2===0) hits=await detectRegion(0,y0,vw,rh,minScore);
+        else{const tw=Math.min(vw,rh*1.1),xs=[0,(vw-tw)/2,vw-tw][tile%3];tile++;hits=await detectRegion(xs,y0,tw,rh,minScore*.8)}
+      }
       let best=null,bestS=-1;
-      for(const p of preds){if(p.class!=='sports ball')continue;const[x,y,w,h]=p.bbox;const cx=1-(x+w/2)/vw,cy=(y+h/2)/vh;if(cy<roiY())continue;
-        let s=p.score;if(trackX!=null)s-=Math.abs(cx-trackX)*.5;if(s>bestS){bestS=s;best={cx,cy,w:w/vw,h:h/vh,score:p.score}}}
-      if(best){setX(best.cx);aiBox=best}else aiBox=null;
+      for(const h of hits){const cx=1-(h.x+h.w/2)/vw,cy=(h.y+h.h/2)/vh;if(cy<roiY())continue;
+        let sc=h.score;if(trackX!=null)sc-=Math.abs(cx-trackX)*.4;if(sc>bestS){bestS=sc;best={cx,cy,w:h.w/vw,h:h.h/vh,score:h.score}}}
+      if(best){setX(best.cx);aiBox=best;missN=0}else missN++;
       aiN++;const t=performance.now();if(t-aiT>1000){aiFps=aiN*1000/(t-aiT);aiN=0;aiT=t;status((camActive()?'Bollen hittad':'Letar efter bollen…')+' · '+aiFps.toFixed(0)+' bilder/s')}
     }catch(e){}
     aiBusy=false;
@@ -235,13 +257,13 @@ function track(){
   if(!camOn||video.readyState<2)return;
   cc.save();cc.scale(-1,1);cc.drawImage(video,-CW,0,CW,CH);cc.restore();
   if(trkMode()==='color')colorTrack();
-  else if(aiBox&&performance.now()-lastSeen<400){cc.strokeStyle='#ffd23f';cc.lineWidth=2;cc.strokeRect((aiBox.cx-aiBox.w/2)*CW,(aiBox.cy-aiBox.h/2)*CH,aiBox.w*CW,aiBox.h*CH)}
+  else if(aiBox&&performance.now()-lastSeen<700){cc.strokeStyle='#ffd23f';cc.lineWidth=2;cc.strokeRect((aiBox.cx-aiBox.w/2)*CW,(aiBox.cy-aiBox.h/2)*CH,aiBox.w*CW,aiBox.h*CH)}
   // guides
   const y0=roiY()*CH;cc.fillStyle='rgba(0,0,0,.45)';cc.fillRect(0,0,CW,y0);
   cc.strokeStyle='rgba(255,255,255,.5)';cc.lineWidth=1;[CW/3,CW*2/3].forEach(x=>{cc.beginPath();cc.moveTo(x,y0);cc.lineTo(x,CH);cc.stroke()});
   if(trackX!=null&&performance.now()-lastSeen<400){cc.fillStyle='#ffd23f';cc.fillRect(trackX*CW-2,CH-8,4,8)}
 }
-function camActive(){return camOn&&trackX!=null&&performance.now()-lastSeen<400}
+function camActive(){return camOn&&trackX!=null&&performance.now()-lastSeen<700}
 
 /* ---------- Audio ---------- */
 let ac=null;
@@ -331,7 +353,7 @@ function frame(){
   const tNow=performance.now(),dt=Math.min(100,tNow-lastF);lastF=tNow;
   if(waiting){if(camActive()&&lane===1){holdMs+=dt;if(holdMs>=1000)start()}else holdMs=Math.max(0,holdMs-dt*2)}
   if(running&&gateOn()){
-    if(!camActive()){lostMs+=dt;if(!paused&&lostMs>800&&ac.state==='running'){ac.suspend();paused=true;holdMs=0}}
+    if(!camActive()){lostMs+=dt;if(!paused&&lostMs>1200&&ac.state==='running'){ac.suspend();paused=true;holdMs=0}}
     else{lostMs=0;if(paused){holdMs+=dt;if(holdMs>=500){ac.resume();paused=false}}}
   }
   const T=running?now():0;

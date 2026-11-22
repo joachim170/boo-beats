@@ -20,6 +20,9 @@
 html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--fg);font-family:var(--body);overflow:hidden;-webkit-user-select:none;user-select:none}
 #game{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+#run3d{position:fixed;inset:0;width:100%;height:100%;display:none}
+.mode.hero{grid-column:1/-1;border-color:var(--accent)}
+.mode.hero b{font-size:26px}
 .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(6,9,20,.78);overflow:auto}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px;width:min(760px,100%);display:grid;gap:18px}
 h1{font-family:var(--display);font-weight:800;font-size:clamp(40px,6vw,64px);letter-spacing:.02em;margin:0;line-height:.9;text-transform:uppercase}
@@ -62,6 +65,7 @@ summary{cursor:pointer;font-family:var(--display);font-weight:600;font-size:18px
 </style>
 </head>
 <body>
+<canvas id="run3d"></canvas>
 <canvas id="game"></canvas>
 <button id="quit" class="btn ghost" hidden>Avsluta</button>
 
@@ -69,6 +73,7 @@ summary{cursor:pointer;font-family:var(--display);font-weight:600;font-size:18px
   <div class="card">
     <div><h1>Boo <span>Beats</span></h1><p class="ver">Version <span class="vnum"></span></p></div>
     <div class="modes" id="modes">
+      <button class="mode hero" data-mode="run" aria-pressed="false"><b>Boo Run · Rua</b><small>Spring genom Rios gator med bollen. Byt fil, gör caneta och lyft bollen för chapéu.</small></button>
       <button class="mode" data-mode="slalom" aria-pressed="true"><b>Rytm-slalom</b><small>Portar på takten. Ren teknik och tempo.</small></button>
       <button class="mode" data-mode="pattern" aria-pressed="false"><b>Mönster</b><small>Länkade rörelsemönster, ett efter ett.</small></button>
       <button class="mode" data-mode="color" aria-pressed="false"><b>Scanning</b><small>Färgsignal i ögonvrån avgör sidan.</small></button>
@@ -95,6 +100,7 @@ summary{cursor:pointer;font-family:var(--display);font-weight:600;font-size:18px
         <label for="camSel" id="camSelWrap" hidden>Kamera<select id="camSel"></select></label>
         <label for="sens">Känslighet<input id="sens" type="range" min="1" max="10" value="5"></label>
         <label for="roi">Ignorera övre del av bilden<input id="roi" type="range" min="0" max="70" value="30"></label>
+        <label for="jump">Hopp i Boo Run<select id="jump"><option value="1">På – lyft bollen (eller svep upp)</option><option value="0">Av</option></select></label>
         <label for="gate"><span>Starta och pausa på bollen</span><select id="gate"><option value="1">På – spelet väntar tills bollen syns</option><option value="0">Av</option></select></label>
       </div>
       <p class="small">Utan kamera styr du med fingret, musen eller A S D.</p>
@@ -113,7 +119,7 @@ summary{cursor:pointer;font-family:var(--display);font-weight:600;font-size:18px
 
 <script>
 (()=>{
-const VERSION='0.9';
+const VERSION='1.0';
 let vclock=null;const nowMs=()=>vclock!=null?vclock:performance.now();
 const $=id=>document.getElementById(id);
 document.querySelectorAll('.vnum').forEach(e=>e.textContent=VERSION);
@@ -121,6 +127,7 @@ const cv=$('game'), g=cv.getContext('2d');
 const store={get(k,d){try{const v=localStorage.getItem('boobeats.'+k);return v==null?d:v}catch(e){return d}},set(k,v){try{localStorage.setItem('boobeats.'+k,v)}catch(e){}}};
 
 const RULES={
+  run:'Bollens fil styr spelaren. Undvik vagnar och tacklingar, plocka mynt. Ligg kvar i filen när en försvarare står bredbent = CANETA. Lyft bollen (eller svep uppåt) för att hoppa = CHAPÉU. Tre liv.',
   slalom:'Portarna kommer i takt. Ha bollen i den fil där porten är när den passerar den gula linjen.',
   pattern:'Portarna bildar namngivna mönster som länkas ihop: Slalom, In–ut, Trappan, Croqueta-rytm, Dubbel. Mönstrets namn syns uppe till vänster.',
   color:'Porten är dold. En färg blinkar vid skärmkanten. GRÖN = gå till den sidan. RÖD = gå till motsatt sida. Håll blicken upp.',
@@ -136,10 +143,10 @@ const PATTERNS=[
   {n:'Fint & ut',s:[1,2,1,0]}
 ];
 
-let mode=store.get('mode','slalom');
+let mode=store.get('mode','run');
 function setMode(m){mode=m;store.set('mode',m);document.querySelectorAll('.mode').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mode===m));$('ruleText').textContent=RULES[m]}
 document.querySelectorAll('.mode').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
-['bpm','step','reveal','dur','gate'].forEach(id=>{const v=store.get(id,null);if(v)$(id).value=v;$(id).onchange=()=>store.set(id,$(id).value)});
+['bpm','step','reveal','dur','gate','jump'].forEach(id=>{const v=store.get(id,null);if(v)$(id).value=v;$(id).onchange=()=>store.set(id,$(id).value)});
 setMode(mode);
 
 /* ---------- Canvas sizing ---------- */
@@ -150,8 +157,19 @@ addEventListener('resize',resize);resize();
 /* ---------- Input ---------- */
 let playerX=0.5, pointerX=0.5, lane=1;
 cv.addEventListener('pointermove',e=>{pointerX=Math.min(1,Math.max(0,e.clientX/W))});
-cv.addEventListener('pointerdown',e=>{pointerX=Math.min(1,Math.max(0,e.clientX/W))});
-addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(k==='a'||k==='arrowleft')pointerX=1/6;if(k==='s'||k==='arrowdown')pointerX=.5;if(k==='d'||k==='arrowright')pointerX=5/6;if(k==='escape'&&running)endGame()});
+cv.addEventListener('pointerdown',e=>{pointerX=Math.min(1,Math.max(0,e.clientX/W));swipeY=e.clientY});
+let swipeY=null,jumpQueued=false,liftBase=null,lastJump=0;
+cv.addEventListener('pointerup',e=>{if(swipeY!=null&&swipeY-e.clientY>45)jumpQueued=true;swipeY=null});
+function liftCheck(){ // chapéu: bollen stiger i kamerabilden jämfört med golvnivån
+  if(!camActive()){return}
+  const y=(tmpl&&tpos&&tMiss<=10)?tpos.y/TH:(aiBox?aiBox.cy:null);if(y==null)return;
+  const sz=Math.max(.03,(tS||20)/1.5/TH);if(liftBase==null)liftBase=y;
+  const up=liftBase-y;
+  if(up>Math.max(.05,sz*1.2)&&nowMs()-lastJump>750){jumpQueued=true;lastJump=nowMs()}
+  if(up<sz*.5)liftBase=liftBase*.94+y*.06;
+}
+function consumeJump(){const j=jumpQueued;jumpQueued=false;return j}
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(k==='w'||k==='arrowup'||k===' '){jumpQueued=true;e.preventDefault&&e.preventDefault()}if(k==='a'||k==='arrowleft')pointerX=1/6;if(k==='s'||k==='arrowdown')pointerX=.5;if(k==='d'||k==='arrowright')pointerX=5/6;if(k==='escape'&&running)endGame()});
 
 /* ---------- Camera + tracking (AI eller färg) ---------- */
 const camCv=$('cam'), cc=camCv.getContext('2d',{willReadFrequently:true});
@@ -391,7 +409,9 @@ function start(){
   if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();ac.resume();
   build();$('menu').hidden=true;$('result').hidden=true;$('quit').hidden=false;
   t0=ac.currentTime+.3;nextBeat=0;running=true;
-  clearInterval(schedTimer);schedTimer=setInterval(schedule,25);
+  clearInterval(schedTimer);
+  if(mode==='run'){events=[];liftBase=null;jumpQueued=false;BooRun.start(ac,{jump:$('jump').value==='1'})}
+  else schedTimer=setInterval(schedule,25);
 }
 function schedule(){
   while(nextBeat*beat<now()+.12){
@@ -403,22 +423,34 @@ function schedule(){
 }
 function endGame(){
   running=false;clearInterval(schedTimer);$('quit').hidden=true;
+  if(mode==='run'&&window.BooRun){const r=BooRun.state;BooRun.stop();
+    $('stats').innerHTML=[[r.score,'Poäng'],[Math.round(r.dist)+' m','Sträcka'],[r.coins,'Mynt'],[r.canetas,'Canetas'],[r.chapeus,'Chapéus'],[r.gols,'Gol']].map(s=>`<div class="stat"><b>${s[0]}</b><span>${s[1]}</span></div>`).join('');
+    $('resNote').textContent=r.dist>1500?'Craque! Rua-banan sitter. Nästa bana kommer.':r.dist>600?'Bra löpning. Jaga fler canetas – de ger mest poäng.':'Kör igen – håll blicken uppe och byt fil tidigt.';
+    $('result').hidden=false;return}
   const tot=stats.hits+stats.miss,acc=tot?Math.round(stats.hits/tot*100):0;
   const k=stats.byKind,pct=a=>a[0]+a[1]?Math.round(a[0]/(a[0]+a[1])*100)+' %':'–';
   $('stats').innerHTML=[[stats.score,'Poäng'],[acc+' %','Träff'],[stats.best,'Bästa streak'],[pct(k.gate),'Teknik'],[pct(k.color),'Scanning'],[pct(k.def),'Läsa försvar']].map(s=>`<div class="stat"><b>${s[0]}</b><span>${s[1]}</span></div>`).join('');
   $('resNote').textContent=acc>=85?'Starkt. Höj tempot eller korta reaktionstiden nästa pass.':acc>=60?'Bra grund. Kör samma inställning igen och jaga streaken.':'Sänk tempot ett steg eller välj längre reaktionstid och bygg upp det.';
   $('result').hidden=false;
 }
+let runLoading=null,overT=0;
+function loadRun(){
+  if(window.BooRun&&window.THREE)return Promise.resolve();
+  if(!runLoading)runLoading=(async()=>{if(!window.THREE)await loadScript('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');await loadScript('run.js?v='+VERSION);BooRun.init($('run3d'))})();
+  return runLoading;
+}
 function gateOn(){return camOn&&$('gate').value==='1'}
 let waiting=false,holdMs=0,lostMs=0,paused=false,lastF=nowMs();
-function play(){
+async function play(){
   if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();ac.resume();
+  if(mode==='run'){try{$('startBtn').textContent='Laddar banan…';await loadRun();BooRun.show(true)}catch(e){$('ruleText').textContent='3D-banan gick inte att ladda. Kontrollera nätet och försök igen.';$('startBtn').textContent='Spela';return}$('startBtn').textContent='Spela'}
+  else if(window.BooRun)BooRun.show(false);
   camToGame();$('menu').hidden=true;$('result').hidden=true;$('quit').hidden=false;
   if(gateOn()){waiting=true;holdMs=0;running=false;camCv.classList.add('big')}else start();
 }
 $('startBtn').onclick=play;$('againBtn').onclick=play;
-$('menuBtn').onclick=()=>{$('result').hidden=true;$('menu').hidden=false;camToMenu()};
-$('quit').onclick=()=>{if(waiting){waiting=false;$('quit').hidden=true;$('menu').hidden=false;camToMenu();return}if(paused){ac.resume();paused=false}endGame()};
+$('menuBtn').onclick=()=>{$('result').hidden=true;$('menu').hidden=false;camToMenu();if(window.BooRun)BooRun.show(false)};
+$('quit').onclick=()=>{if(waiting){waiting=false;$('quit').hidden=true;$('menu').hidden=false;camToMenu();if(window.BooRun)BooRun.show(false);return}if(paused){ac.resume();paused=false}endGame()};
 
 /* ---------- Judging ---------- */
 function judge(T){
@@ -455,6 +487,7 @@ function frame(){
     else{lostMs=0;if(paused){holdMs+=dt;if(holdMs>=500){ac.resume();paused=false}}}
   }
   const T=running?now():0;
+  if(mode==='run'&&window.BooRun&&$('menu').hidden){runFrame(dt);return}
   if(running){judge(T);if(T>durS+.4)endGame()}
   // sky
   const sky=g.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#0b1020');sky.addColorStop(1,'#1b2547');g.fillStyle=sky;g.fillRect(0,0,W,H);
@@ -503,6 +536,10 @@ function frame(){
     if(T<COUNTIN*beat){g.textAlign='center';g.fillStyle='#ffd23f';g.font=`800 ${Math.round(H*.18)}px ${disp}`;g.fillText(COUNTIN-Math.floor(T/beat),cx,H*.5)}
     if(camOn&&!camActive()&&!paused&&!gateOn()){g.textAlign='center';g.fillStyle='#f87171';g.font=`600 ${Math.round(H*.026)}px ${disp}`;g.fillText('BOLLEN SYNS INTE',cx,H*.2)}
   }
+  drawWaitPause();
+}
+function drawWaitPause(){
+  const disp=getComputedStyle(document.documentElement).getPropertyValue('--display');
   if(waiting||paused){
     g.fillStyle='rgba(6,9,20,.55)';g.fillRect(0,0,W,H);g.textAlign='center';
     const big=Math.round(Math.min(W*.09,H*.07)),ty=Math.max(H*.45,camCv.classList.contains('big')?camCv.getBoundingClientRect().bottom+big*1.4:0);
@@ -511,6 +548,30 @@ function frame(){
     fit(paused?'Spelet fortsätter när kameran ser bollen igen':(camActive()?'Spelet startar när bollen ligger i mitten i 1 sekund':'Då låses den med en grön ruta'),600,Math.round(big*.45),ty+big*.9,'#eef2ff');
     const need=paused?500:1000,pr=Math.min(1,holdMs/need);if(pr>0){g.strokeStyle='#4ade80';g.lineWidth=8;g.beginPath();g.arc(cx,ty+big*2.6,big*.8,-Math.PI/2,-Math.PI/2+pr*Math.PI*2);g.stroke()}
   }
+}
+function runFrame(dt){
+  const r=BooRun.state;liftCheck();
+  if(running&&!paused)BooRun.update(dt/1000,lane,consumeJump());else{consumeJump();if(!running)BooRun.update(dt/1000,lane,false)}
+  BooRun.render();g.clearRect(0,0,W,H);
+  const disp=getComputedStyle(document.documentElement).getPropertyValue('--display');
+  const small=Math.round(Math.min(H*.026,W*.042)),big=Math.round(Math.min(H*.058,W*.1)),top=H*.05+small;
+  const txt=(t,x,y,al,w,size,col,shadow=true)=>{g.textAlign=al;g.font=`${w} ${size}px ${disp}`;if(shadow){g.fillStyle='rgba(0,0,0,.45)';g.fillText(t,x+2,y+2)}g.fillStyle=col;g.fillText(t,x,y)};
+  if(running||r.over){
+    txt('RUA · '+Math.round(r.dist)+' M',16,top,'left',600,small,'#fff');
+    txt(String(r.score),16,top+big,'left',800,big,'#ffd23f');
+    // mynt
+    g.fillStyle='#ffcc00';g.beginPath();g.arc(W-16-small*.6,top-small*.35,small*.55,0,7);g.fill();txt(String(r.coins),W-16-small*1.5,top,'right',800,small*1.2,'#fff');
+    // liv som små bollar
+    for(let i=0;i<3;i++){const x=W-16-small*.7-i*small*1.6,y=top+big*.7;g.globalAlpha=i<r.lives?1:.25;g.fillStyle='#fff';g.beginPath();g.arc(x,y,small*.6,0,7);g.fill();g.fillStyle='#111';g.beginPath();g.arc(x,y,small*.22,0,7);g.fill();g.globalAlpha=1}
+    if(r.countdown>0){const n=Math.ceil(r.countdown);txt(n>0?String(n):'VAI!',W/2,H*.42,'center',800,Math.round(H*.16),'#ffd23f')}
+    else if(r.t<4&&r.countdown<=0&&r.dist<25)txt('VAI!',W/2,H*.42,'center',800,Math.round(H*.12),'#4ade80');
+    r.popups=r.popups.filter(p=>r.t-p.t<1);for(const p of r.popups){const a=1-(r.t-p.t);g.globalAlpha=Math.min(1,a*1.5);txt(p.txt,W/2,H*.32-(1-a)*40,'center',800,Math.round(Math.min(W*.13,H*.08)),p.col);g.globalAlpha=1}
+    if(r.hitFlash>0){g.fillStyle=`rgba(239,68,68,${r.hitFlash*.25})`;g.fillRect(0,0,W,H)}
+    if(camOn&&!camActive()&&!paused&&!gateOn())txt('BOLLEN SYNS INTE',W/2,H*.2,'center',600,small,'#f87171');
+    g.textAlign='right';g.fillStyle='rgba(255,255,255,.6)';g.font=`600 12px ${disp}`;g.fillText('V'+VERSION,W-16,H-16);
+  }
+  drawWaitPause();
+  if(running&&r.over&&!overT)overT=setTimeout(()=>{overT=0;if(running)endGame()},900);
 }
 requestAnimationFrame(frame);
 // testkrok (används av automatiska tester, påverkar inte spelet)

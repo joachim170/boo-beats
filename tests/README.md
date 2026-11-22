@@ -11,3 +11,4 @@ Körs i en headless Chrome med Playwright.
 - `realball.py` + `genreal.py` – realistisk 3D-renderad fotboll (med och utan fot), nära och långt bort.
 - `step.py` – spårningen bild för bild med exakt facit (som på en snabb telefon, AI på varannan bild). Det viktigaste testet för spårningskvalitet.
 - `ai.py` – samma sak i realtid med fejkad kamera.
+- `run.py` – Boo Run: laddar 3D-banan, en bot styr (filbyte, caneta, hopp), kollar att spelet tar slut efter tre krockar.

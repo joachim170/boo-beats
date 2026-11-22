@@ -6,7 +6,7 @@ async def main():
         b=await p.chromium.launch(executable_path='/usr/bin/google-chrome',args=['--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream','--autoplay-policy=no-user-gesture-required'])
         pg=await b.new_page(viewport={'width':390,'height':844}); errs=[]; pg.on('pageerror',lambda e:errs.append(str(e)))
         await pg.route('**/cdn.jsdelivr.net/**',lambda r:r.abort())
-        await pg.goto('file:///home/claude/boo-beats/index.html')
+        await pg.goto('file:///home/claude/boo-beats/index.html'); await pg.click('.mode[data-mode="slalom"]')
         print('inställningar dolda:',not await pg.is_visible('#bpm'),'| version:',await pg.inner_text('.ver'))
         await pg.click('#camBtn'); await pg.wait_for_timeout(1000)
         print('kamera i menyn:',await pg.evaluate("document.getElementById('cam').parentElement.id"))

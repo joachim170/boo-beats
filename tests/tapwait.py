@@ -8,7 +8,7 @@ async def main():
         await ctx.add_init_script("try{localStorage.setItem('boobeats.trkMode','color');localStorage.setItem('boobeats.ver','0.6');localStorage.setItem('boobeats.camWanted','1')}catch(e){}")
         pg=await ctx.new_page(); errs=[]; pg.on('pageerror',lambda e:errs.append(str(e)))
         await pg.route('**/cdn.jsdelivr.net/**',lambda r:r.abort())
-        await pg.goto('file:///home/claude/boo-beats/index.html'); await pg.wait_for_timeout(2000)
+        await pg.goto('file:///home/claude/boo-beats/index.html'); await pg.click('.mode[data-mode="slalom"]'); await pg.wait_for_timeout(2000)
         print('spårningsläge efter uppdatering:',await pg.input_value('#trkMode'))
         await ctx.add_init_script("")  # no-op
         await pg.click('#startBtn'); await pg.wait_for_timeout(600)

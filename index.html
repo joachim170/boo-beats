@@ -113,7 +113,7 @@ summary{cursor:pointer;font-family:var(--display);font-weight:600;font-size:18px
 
 <script>
 (()=>{
-const VERSION='0.7';
+const VERSION='0.8';
 const $=id=>document.getElementById(id);
 document.querySelectorAll('.vnum').forEach(e=>e.textContent=VERSION);
 const cv=$('game'), g=cv.getContext('2d');
@@ -228,7 +228,7 @@ async function aiLoop(){
         let sc=h.score;if(trackX!=null)sc-=Math.abs(cx-trackX)*.4;if(sc>bestS){bestS=sc;best={cx,cy,w:h.w/vw,h:h.h/vh,score:h.score}}}
       if(best){missN=0;
         const bpx=best.cx*TW,bpy=best.cy*TH,bsz=Math.max(best.w*TW,best.h*TH);
-        if(!tmpl||Math.hypot(bpx-tpos.x,bpy-tpos.y)>tS*1.5||tScore<.6){const g=grayFrame();if(g)seedAt(bpx,bpy,bsz,g)}
+        if(!tmpl||Math.hypot(bpx-tpos.x,bpy-tpos.y)>tS*1.5||tScore<.6){const g=grayFrame();if(g&&(best.score>.6||!tmpl||colorOK(bpx,bpy)))seedAt(bpx,bpy,bsz,g)}
         if(!tmpl){setX(best.cx);aiBox=best}
       }else missN++;
       aiN++;const t=performance.now();if(t-aiT>1000){aiFps=aiN*1000/(t-aiT);aiN=0;aiT=t;status((camActive()?'Bollen hittad':'Letar efter bollen…')+' · '+aiFps.toFixed(0)+' bilder/s')}
@@ -240,27 +240,37 @@ async function aiLoop(){
 
 /* Mallspårning: följer bollen bild för bild (30 fps) efter att AI:n hittat den eller du tryckt på den */
 const TW=320,TH=240,tcv=document.createElement('canvas');tcv.width=TW;tcv.height=TH;const tx=tcv.getContext('2d',{willReadFrequently:true});
+let lastRGB=null,tCol=null;
 let tmpl=null,tS=0,tpos=null,tMiss=0,tScore=0,tvel={x:0,y:0};
-function grayFrame(){if(video.readyState<2)return null;tx.save();tx.scale(-1,1);tx.drawImage(video,-TW,0,TW,TH);tx.restore();const d=tx.getImageData(0,0,TW,TH).data,g=new Float32Array(TW*TH);for(let i=0,p=0;p<g.length;i+=4,p++)g[p]=d[i]*.299+d[i+1]*.587+d[i+2]*.114;return blur(blur(g))}
+function grayFrame(){if(video.readyState<2)return null;tx.save();tx.scale(-1,1);tx.drawImage(video,-TW,0,TW,TH);tx.restore();const d=tx.getImageData(0,0,TW,TH).data,g=new Float32Array(TW*TH);lastRGB=d;for(let i=0,p=0;p<g.length;i+=4,p++)g[p]=d[i]*.299+d[i+1]*.587+d[i+2]*.114;return blur(blur(g))}
 const bt=new Float32Array(TW*TH);function blur(g){const r=2,k=2*r+1;for(let y=0;y<TH;y++){let a=0;const o=y*TW;for(let x=-r;x<=r;x++)a+=g[o+Math.min(TW-1,Math.max(0,x))];for(let x=0;x<TW;x++){bt[o+x]=a/k;a+=g[o+Math.min(TW-1,x+r+1)]-g[o+Math.max(0,x-r)]}}const out=new Float32Array(TW*TH);for(let x=0;x<TW;x++){let a=0;for(let y=-r;y<=r;y++)a+=bt[Math.min(TH-1,Math.max(0,y))*TW+x];for(let y=0;y<TH;y++){out[y*TW+x]=a/k;a+=bt[Math.min(TH-1,y+r+1)*TW+x]-bt[Math.max(0,y-r)*TW+x]}}return out}
 function patch(g,cx,cy,S){const h=S>>1,out=new Float32Array(S*S);let m=0;for(let y=0;y<S;y++)for(let x=0;x<S;x++){const X=Math.min(TW-1,Math.max(0,Math.round(cx-h+x))),Y=Math.min(TH-1,Math.max(0,Math.round(cy-h+y)));const v=g[Y*TW+X];out[y*S+x]=v;m+=v}m/=out.length;let sd=0;for(let i=0;i<out.length;i++){out[i]-=m;sd+=out[i]*out[i]}sd=Math.sqrt(sd)||1;for(let i=0;i<out.length;i++)out[i]/=sd;return{p:out,sd}}
 function radial(p,S){const h=S/2,nb=Math.ceil(h*1.42)+1,sum=new Float32Array(nb),cnt=new Float32Array(nb);for(let y=0;y<S;y++)for(let x=0;x<S;x++){const b=Math.round(Math.hypot(x+.5-h,y+.5-h));sum[b]+=p[y*S+x];cnt[b]++}const o=new Float32Array(S*S);let m=0;for(let y=0;y<S;y++)for(let x=0;x<S;x++){const b=Math.round(Math.hypot(x+.5-h,y+.5-h));o[y*S+x]=sum[b]/cnt[b];m+=o[y*S+x]}m/=o.length;let sd=0;for(let i=0;i<o.length;i++){o[i]-=m;sd+=o[i]*o[i]}sd=Math.sqrt(sd)||1;for(let i=0;i<o.length;i++)o[i]/=sd;return o}
 function scaleT(t,S,N){const o=new Float32Array(N*N);let m=0;for(let y=0;y<N;y++)for(let x=0;x<N;x++){const v=t[Math.min(S-1,Math.floor(y*S/N))*S+Math.min(S-1,Math.floor(x*S/N))];o[y*N+x]=v;m+=v}m/=o.length;let sd=0;for(let i=0;i<o.length;i++){o[i]-=m;sd+=o[i]*o[i]}sd=Math.sqrt(sd)||1;for(let i=0;i<o.length;i++)o[i]/=sd;return o}
+function meanRGB(cx,cy,r){if(!lastRGB)return null;let R=0,G=0,B=0,n=0;r=Math.max(2,r);for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++){if(x*x+y*y>r*r)continue;const X=Math.round(cx+x),Y=Math.round(cy+y);if(X<0||Y<0||X>=TW||Y>=TH)continue;const i=(Y*TW+X)*4;R+=lastRGB[i];G+=lastRGB[i+1];B+=lastRGB[i+2];n++}return n?[R/n,G/n,B/n]:null}
+function colorOK(cx,cy){ // är det här samma färg som bollen? (fot/sko/strumpa har oftast annan färg)
+  if(!tCol)return true;const c=meanRGB(cx,cy,Math.round(tS*.22));if(!c)return false;
+  const b1=(tCol[0]+tCol[1]+tCol[2])/3,b2=(c[0]+c[1]+c[2])/3;
+  const ch=Math.abs((c[0]-b2)-(tCol[0]-b1))+Math.abs((c[1]-b2)-(tCol[1]-b1))+Math.abs((c[2]-b2)-(tCol[2]-b1));
+  return ch<45&&Math.abs(b2-b1)<55;
+}
 function seedAt(cx,cy,size,g){
   if(!size){ // hitta bollens storlek: störst skillnad mellan mitten och en ring runt
     let best=-1;for(const D of [8,10,13,16,20,25,31,38]){let a=0,na=0,b=0,nb=0;const r=D/2;
       for(let y=-D;y<=D;y++)for(let x=-D;x<=D;x++){const d=Math.hypot(x,y),X=Math.round(cx+x),Y=Math.round(cy+y);if(X<0||Y<0||X>=TW||Y>=TH)continue;const v=g[Y*TW+X];if(d<r*.6){a+=v;na++}else if(d>r*1.15&&d<r*1.6){b+=v;nb++}}
       const c=na&&nb?Math.abs(a/na-b/nb):0;if(c>best*1.08){best=c;size=D}}}
-  tS=Math.max(10,Math.min(48,Math.round(size*1.5)))|0;if(tS%2)tS++;tmpl=radial(patch(g,cx,cy,tS).p,tS);tpos={x:cx,y:cy};tvel={x:0,y:0};tMiss=0;tScore=1;
+  tS=Math.max(10,Math.min(48,Math.round(size*1.5)))|0;if(tS%2)tS++;tmpl=radial(patch(g,cx,cy,tS).p,tS);tCol=meanRGB(cx,cy,Math.round(tS*.22));tpos={x:cx,y:cy};tvel={x:0,y:0};tMiss=0;tScore=1;
 }
 function ncc(g,cx,cy){const S=tS,h=S>>1;let m=0,n=S*S;const x0=Math.round(cx-h),y0=Math.round(cy-h);if(x0<0||y0<0||x0+S>TW||y0+S>TH)return -1;
   for(let y=0;y<S;y++){const r=(y0+y)*TW+x0;for(let x=0;x<S;x++)m+=g[r+x]}m/=n;let num=0,den=0;
   for(let y=0;y<S;y++){const r=(y0+y)*TW+x0;for(let x=0;x<S;x++){const v=g[r+x]-m;num+=v*tmpl[y*S+x];den+=v*v}}return den>1?num/Math.sqrt(den):-1}
-let tFrame=0;
+let tFrame=0,reCand=null;
 function globalSearch(g){ // hela golvytan, grovt raster, hittar bollen igen efter tapp
-  const h=tS>>1,y0=Math.max(h,Math.round(roiY()*TH)+h);let best=-2,bx=0,by=0;
-  for(let y=y0;y<TH-h;y+=3)for(let x=h;x<TW-h;x+=3){const v=ncc(g,x,y);if(v>best){best=v;bx=x;by=y}}
-  for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const v=ncc(g,bx+dx,by+dy);if(v>best){best=v;bx+=dx;by+=dy}}
+  const h=tS>>1,y0=Math.max(h,Math.round(roiY()*TH)+h),top=[];
+  for(let y=y0;y<TH-h;y+=3)for(let x=h;x<TW-h;x+=3){const v=ncc(g,x,y);if(v>.6){top.push([v,x,y])}}
+  top.sort((a,b)=>b[0]-a[0]);let best=-2,bx=0,by=0;
+  for(const [v0,x0,y0b] of top.slice(0,12)){let v=v0,x=x0,y=y0b;for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const w=ncc(g,x0+dx,y0b+dy);if(w>v){v=w;x=x0+dx;y=y0b+dy}}
+    if(colorOK(x,y)){best=v;bx=x;by=y;break}}
   return{best,bx,by};
 }
 function templateTrack(){
@@ -271,14 +281,15 @@ function templateTrack(){
     const SC=[1,.7,1.4,.5,2,2.8,.35],f=SC[(tFrame>>1)%SC.length],keep={t:tmpl,s:tS};
     const S=Math.max(10,Math.min(64,Math.round(keep.s*f/2)*2));if(S!==tS){tS=S;tmpl=scaleT(keep.t,keep.s,S)}
     const r=globalSearch(g);
-    if(r.best>.72){tpos={x:r.bx,y:r.by};tvel={x:0,y:0};tMiss=0;tScore=r.best;setX(r.bx/TW);aiBox={cx:r.bx/TW,cy:r.by/TH,w:tS/TW,h:tS/TH,score:r.best}}
+    const near=r.best>.75&&reCand&&Math.hypot(r.bx-reCand.x,r.by-reCand.y)<tS;reCand=r.best>.75?{x:r.bx,y:r.by}:null;
+    if(near){tpos={x:r.bx,y:r.by};tvel={x:0,y:0};tMiss=0;tScore=r.best;setX(r.bx/TW);aiBox={cx:r.bx/TW,cy:r.by/TH,w:tS/TW,h:tS/TH,score:r.best}}
     else{tmpl=keep.t;tS=keep.s}
     return;
   }const R=Math.round(Math.max(24,tS*2.5))*(tMiss?1.5:1);const px=tpos.x+tvel.x,py=tpos.y+tvel.y;let best=-2,bx=px,by=py;
   for(let dy=-R;dy<=R;dy+=2)for(let dx=-R;dx<=R;dx+=2){const v=ncc(g,px+dx,py+dy);if(v>best){best=v;bx=px+dx;by=py+dy}}
   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const v=ncc(g,bx+dx,by+dy);if(v>best){best=v;bx+=dx;by+=dy}}
   tScore=best;
-  if(best>.55&&by/TH>=roiY()){tvel={x:(bx-tpos.x)*.6,y:(by-tpos.y)*.6};tpos={x:bx,y:by};tMiss=0;setX(bx/TW);aiBox={cx:bx/TW,cy:by/TH,w:tS/TW,h:tS/TH,score:best};
+  if(best>.55&&by/TH>=roiY()&&colorOK(bx,by)){tvel={x:(bx-tpos.x)*.6,y:(by-tpos.y)*.6};tpos={x:bx,y:by};tMiss=0;setX(bx/TW);aiBox={cx:bx/TW,cy:by/TH,w:tS/TW,h:tS/TH,score:best};
     if(best>.8){const q=radial(patch(g,bx,by,tS).p,tS);for(let i=0;i<tmpl.length;i++)tmpl[i]=tmpl[i]*.9+q[i]*.1}}
   else{tvel={x:0,y:0};tMiss++}
 }
